@@ -9,13 +9,14 @@
      - one origin we control, so if ESPN ever tightens CORS or starts rate
        limiting, the fix is here rather than in every client.
 
-   What it deliberately is not: a general proxy. It forwards GET only, to one
-   host, under two known path prefixes, for an allowlisted set of sports, and only for
+   What it deliberately is not: a general proxy. It forwards GET only, to two
+   ESPN hosts under three known path prefixes, for an allowlisted set of sports,
+   and only for
    the origins that are actually this app. The Lost Ark connector was briefly a
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-fixtures";
+const WORKER_VERSION = "2026-08-23-core";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -60,9 +61,25 @@ const ALLOWED_PATHS = [
    standings to one conference, fixture for the unplayed half of a soccer season. */
 const ALLOWED_PARAMS = ["season", "seasontype", "team", "limit", "event", "group", "fixture"];
 
+/* ESPN's core API is a different service on a different host, and it carries
+   things the site API does not -- soccer team statistics among them, which
+   site.api answers with an empty results:{} in every season tried. So the route
+   table now names an origin per row as well as a prefix. */
+const ESPN_CORE_ORIGIN = "https://sports.core.api.espn.com";
+const ESPN_CORE_PREFIX = "/v2/sports";
+const ALLOWED_PATHS_CORE = [
+  /^soccer\/leagues\/[a-z]{3}\.[a-z0-9_]+\/seasons\/\d{4}\/types\/\d\/teams\/\d+\/statistics$/,
+];
+
 const API_ROUTES = [
-  { prefix: "/espn/", upstream: ESPN_PREFIX, paths: ALLOWED_PATHS },
-  { prefix: "/espn2/", upstream: ESPN_V2_PREFIX, paths: ALLOWED_PATHS_V2 },
+  { prefix: "/espn/", origin: ESPN_ORIGIN, upstream: ESPN_PREFIX, paths: ALLOWED_PATHS },
+  { prefix: "/espn2/", origin: ESPN_ORIGIN, upstream: ESPN_V2_PREFIX, paths: ALLOWED_PATHS_V2 },
+  {
+    prefix: "/espncore/",
+    origin: ESPN_CORE_ORIGIN,
+    upstream: ESPN_CORE_PREFIX,
+    paths: ALLOWED_PATHS_CORE,
+  },
 ];
 
 /* A finished season never changes; a live one changes every few seconds. The
@@ -137,7 +154,7 @@ export default {
       return json({ error: "path not allowed" }, { status: 404, origin });
     }
 
-    const upstream = new URL(`${ESPN_ORIGIN}${route.upstream}/${path}`);
+    const upstream = new URL(`${route.origin}${route.upstream}/${path}`);
     for (const key of ALLOWED_PARAMS) {
       const value = url.searchParams.get(key);
       if (value !== null && /^[\w.-]{1,16}$/.test(value)) {
