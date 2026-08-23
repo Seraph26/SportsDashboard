@@ -35,6 +35,14 @@ leagues' schedule paths, and only for origins in `ALLOWED_ORIGINS`. **If the
 site ever moves — custom domain, account rename, Cloudflare Pages — add the new
 origin there or every request 403s.**
 
+
+## Documentation
+
+    FIELD-GUIDE.md              every measured ESPN quirk, the worker contract,
+                                and the rule that saves the most time
+    MIGRATION.md                what breaks when this moves to another account
+    legacy-nextjs/RECOVERY.md   the Next.js original this was rebuilt from
+
 ## Routes
 
 Hash routes, not paths. GitHub Pages has no rewrite rules, so `/teams/jets/2024`
