@@ -15,7 +15,7 @@
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-status-4xx";
+const WORKER_VERSION = "2026-08-23-news";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -52,6 +52,30 @@ const ALLOWED_PARAMS = ["season", "seasontype"];
 const CACHE_LIVE_SECONDS = 15;
 const CACHE_ARCHIVE_SECONDS = 60 * 60 * 6;
 
+/* --- Team news -------------------------------------------------------------
+
+   The original Next.js dashboard fetched Google News RSS server-side, which is
+   why news did not survive the static rebuild: news.google.com sends no CORS
+   headers, so a browser cannot fetch it at all. The worker is now that server.
+
+   The query strings live here rather than being passed in, for the same reason
+   the ESPN paths are an allowlist: a proxy that forwards an arbitrary caller
+   query to Google is a general-purpose search proxy, and this is not one. Four
+   keys, four fixed queries.
+
+   Feeds are cached 15 minutes, matching the revalidate window the original
+   used -- headlines do not move faster than that and every visitor shares one
+   fetch per team. */
+const NEWS_QUERIES = {
+  jets: "New York Jets NFL",
+  mets: "New York Mets MLB",
+  wrexham: "Wrexham soccer",
+  providence: "Providence Friars basketball",
+};
+const NEWS_ORIGIN = "https://news.google.com";
+const NEWS_CACHE_SECONDS = 15 * 60;
+const NEWS_LIMIT = 6;
+
 function allowedOrigin(request) {
   const origin = request.headers.get("Origin");
   return origin && ALLOWED_ORIGINS.has(origin) ? origin : null;
@@ -81,6 +105,92 @@ function json(body, { status = 200, origin, cacheSeconds = 0 } = {}) {
   });
 }
 
+/* RSS parsing, ported from the original lib/newsService.ts. Regex rather than a
+   parser because Workers have no DOMParser and a feed is a flat, predictable
+   shape -- and because this is the same code that already worked. */
+function extractTag(xml, tag) {
+  const match = xml.match(new RegExp(`<${tag}[^>]*>([\s\S]*?)<\/${tag}>`, "i"));
+  return (match && match[1] ? match[1] : "").trim();
+}
+
+function stripTags(value) {
+  return value.replace(/<[^>]+>/g, "").trim();
+}
+
+function decodeEntities(value) {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/gi, "'")
+    .replace(/&#x2F;/gi, "/")
+    /* &amp; last, so "&amp;lt;" does not decode twice into a real tag. */
+    .replace(/&amp;/g, "&");
+}
+
+function parseNewsFeed(xml) {
+  const items = [];
+  for (const match of xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
+    const block = match[1] || "";
+    const title = decodeEntities(stripTags(extractTag(block, "title")));
+    const url = decodeEntities(stripTags(extractTag(block, "link")));
+    if (!title || !url) continue;
+    items.push({
+      title,
+      url,
+      source: decodeEntities(stripTags(extractTag(block, "source"))) || undefined,
+      publishedAt: decodeEntities(stripTags(extractTag(block, "pubDate"))) || undefined,
+    });
+  }
+  return items;
+}
+
+async function handleNews(teamKey, origin, ctx) {
+  const query = NEWS_QUERIES[teamKey];
+  if (!query) {
+    return json({ error: "unknown team" }, { status: 404, origin });
+  }
+
+  const upstream = `${NEWS_ORIGIN}/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+  const cacheKey = new Request(upstream, { method: "GET" });
+  const cache = caches.default;
+
+  const hit = await cache.match(cacheKey);
+  if (hit) {
+    return json(await hit.json(), { origin, cacheSeconds: NEWS_CACHE_SECONDS });
+  }
+
+  let res;
+  try {
+    res = await fetch(upstream, {
+      headers: { Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8" },
+    });
+  } catch (err) {
+    return json({ error: "news upstream unreachable" }, { status: 502, origin });
+  }
+  if (!res.ok) {
+    return json({ error: `news upstream ${res.status}` }, { status: 502, origin });
+  }
+
+  const items = parseNewsFeed(await res.text()).slice(0, NEWS_LIMIT);
+  const payload = { team: teamKey, items };
+
+  ctx.waitUntil(
+    cache.put(
+      cacheKey,
+      new Response(JSON.stringify(payload), {
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": `public, max-age=${NEWS_CACHE_SECONDS}`,
+        },
+      }),
+    ),
+  );
+
+  return json(payload, { origin, cacheSeconds: NEWS_CACHE_SECONDS });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const origin = allowedOrigin(request);
@@ -98,6 +208,11 @@ export default {
     if (!origin) {
       return json({ error: "origin not allowed" }, { status: 403, origin });
     }
+    /* Team news. Behind the same origin gate as everything else. */
+    if (url.pathname.startsWith("/news/")) {
+      return handleNews(url.pathname.slice("/news/".length), origin, ctx);
+    }
+
     if (!url.pathname.startsWith("/espn/")) {
       return json({ error: "not found" }, { status: 404, origin });
     }
