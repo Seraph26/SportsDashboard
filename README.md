@@ -56,6 +56,8 @@ server.
     js/record.js        score parsing and W-L-T
     js/gameCard.js      one game
     js/scoreboard.js    the list, plus the 15s live poll
+    js/news.js          team headlines from ESPN's news endpoint
+    js/countdown.js     next-game countdown on the dashboard
     js/app.js           router and pages
     worker/src/index.js Cloudflare proxy
 
@@ -88,6 +90,15 @@ server.
   deliberately. Real browsers calling ESPN directly are unaffected — this only
   bites server-side callers, which is why the bug appeared the moment the worker
   went live and never in direct mode.
+- **Google News blocks Cloudflare, so news comes from ESPN.** The original
+  Next.js app read Google News RSS server-side. That does not port twice over:
+  Google sends no CORS headers, so a browser cannot fetch it, and Google answers
+  `503` to Cloudflare's address ranges, so proxying it through the worker fails
+  too. Every user agent returns `200` from a residential IP — the block is by
+  address, not user agent, so no header tweak reaches it. ESPN's own
+  `/news?team=` endpoint is genuinely team-filtered (`team=352` returns Wrexham
+  stories, not Championship stories), sits on the host already allowlisted, and
+  sends CORS, so news works with the worker switched off too.
 - **A team's *current* season can legitimately be empty.** In August, college
   basketball's 2026-27 exists as a season number with no schedule posted. The
   team page falls back to the last season actually played rather than showing an
