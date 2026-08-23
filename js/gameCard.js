@@ -53,7 +53,17 @@ function sideMarkup(competitor, { leading }) {
 /* showWeek: ESPN stamps a week number on MLB and college basketball events too,
    where it is an internal scheduling artefact and reads as nonsense ("WEEK 13"
    on a March baseball game). Only the NFL asks for it. */
-export function renderGameCard(game, teamId, { showWeek = false } = {}) {
+/* Where a card links. Needs the sport and the league the game was filed under:
+   for soccer that is whichever division answered, tagged onto the game by
+   teamData, because a promoted club's games are not all in one league. */
+export function gameHref(game, team) {
+  if (!team || !game?.id) return null;
+  const league = game.leaguePath || team.path;
+  if (!league) return null;
+  return `#/games/${team.sport}/${league}/${game.id}`;
+}
+
+export function renderGameCard(game, teamId, { showWeek = false, team = null } = {}) {
   const comp = competition(game);
   const { home, away } = sides(game, teamId);
   const status = comp?.status?.type;
@@ -73,8 +83,16 @@ export function renderGameCard(game, teamId, { showWeek = false } = {}) {
      rebuilt from state. */
   const statusText = status?.shortDetail || status?.description || "";
 
+  /* The whole card is the link when we can build one -- an <a> rather than a
+     click handler, so middle-click and "open in new tab" work and the target
+     survives a reload. A game with no id (rare, but ESPN does it for some
+     placeholder fixtures) simply stays unclickable. */
+  const href = gameHref(game, team);
+  const tag = href ? "a" : "article";
+  const attrs = href ? ` href="${escapeHtml(href)}"` : "";
+
   return `
-    <article class="game${outcome ? ` game--${outcome}` : ""}${live ? " game--live" : ""}">
+    <${tag} class="game${outcome ? ` game--${outcome}` : ""}${live ? " game--live" : ""}${href ? " game--link" : ""}"${attrs}>
       <header class="game__meta">
         <span class="game__date">${escapeHtml(dateText)}${timeText ? ` &middot; ${escapeHtml(timeText)}` : ""}</span>
         ${showWeek && game?.week?.text ? `<span class="game__week">${escapeHtml(game.week.text)}</span>` : ""}
@@ -88,5 +106,5 @@ export function renderGameCard(game, teamId, { showWeek = false } = {}) {
         <span>${escapeHtml(statusText)}</span>
         ${outcome ? `<span class="game__outcome">${outcome === "win" ? "W" : outcome === "loss" ? "L" : "T"}</span>` : ""}
       </footer>
-    </article>`;
+    </${tag}>`;
 }

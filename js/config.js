@@ -21,11 +21,17 @@ export const WORKER_BASE = "https://sportsdashboard.seraph0226.workers.dev";
    direct request is the same path under site.api.espn.com. Keeping them
    identical is what lets the toggle be a single constant. */
 const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports";
+/* Standings live on a different ESPN API prefix. The worker exposes it as
+   /espn2/ rather than /espn/, so both modes need to know which one a path wants
+   -- pass { api: "v2" } for standings and nothing for everything else. */
+const ESPN_BASE_V2 = "https://site.api.espn.com/apis/v2/sports";
 
-export function espnUrl(path, params = {}) {
+export function espnUrl(path, params = {}, { api = "site" } = {}) {
+  const clean = path.replace(/^\//, "");
+  const v2 = api === "v2";
   const base = WORKER_BASE
-    ? `${WORKER_BASE.replace(/\/$/, "")}/espn/${path.replace(/^\//, "")}`
-    : `${ESPN_BASE}/${path.replace(/^\//, "")}`;
+    ? `${WORKER_BASE.replace(/\/$/, "")}/${v2 ? "espn2" : "espn"}/${clean}`
+    : `${v2 ? ESPN_BASE_V2 : ESPN_BASE}/${clean}`;
   const url = new URL(base);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));

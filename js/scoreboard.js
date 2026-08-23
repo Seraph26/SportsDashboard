@@ -37,18 +37,18 @@ export function shouldPoll(games) {
   return anyLive(games) || startsSoon(games);
 }
 
-export function renderGames(games, teamId, { showWeek = false } = {}) {
+export function renderGames(games, teamId, { showWeek = false, team = null } = {}) {
   if (!games.length) {
     return '<p class="empty">No games found for this season.</p>';
   }
   return `<div class="games">${games
-    .map((g) => renderGameCard(g, teamId, { showWeek }))
+    .map((g) => renderGameCard(g, teamId, { showWeek, team }))
     .join("")}</div>`;
 }
 
 /* Returns a stop() function. Callers must call it when navigating away or the
    old page's timer keeps writing into a container that is no longer on screen. */
-export function mountScoreboard({ container, teamKey, teamId, season, live, showWeek = false }) {
+export function mountScoreboard({ container, teamKey, teamId, season, live, showWeek = false, team = null }) {
   let timer = null;
   let stopped = false;
 
@@ -57,7 +57,7 @@ export function mountScoreboard({ container, teamKey, teamId, season, live, show
     try {
       const games = await getTeamGames(teamKey, season, { refresh: true });
       if (stopped) return;
-      container.innerHTML = renderGames(games, teamId, { showWeek });
+      container.innerHTML = renderGames(games, teamId, { showWeek, team });
       schedule(games);
     } catch {
       /* A failed poll is not worth destroying the schedule already on screen

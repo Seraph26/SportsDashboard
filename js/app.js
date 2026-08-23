@@ -14,6 +14,7 @@ import { getTeamGames, getAvailableSeasons, currentSeason } from "./teamData.js"
 import { getTeamRecord } from "./record.js";
 import { renderGames, mountScoreboard } from "./scoreboard.js";
 import { mountCountdown, nextGameInfo } from "./countdown.js";
+import { getGameSummary, summaryHeader, teamStatRows, playerGroups, timeline } from "./gameDetails.js";
 import { getTeamNews } from "./news.js";
 
 const app = document.getElementById("app");
@@ -31,6 +32,11 @@ function parseRoute() {
   const parts = raw.split("/").filter(Boolean);
   if (parts[0] === "teams" && parts[1]) {
     return { name: "team", team: parts[1], year: parts[2] ? Number(parts[2]) : null };
+  }
+  /* #/games/<sport>/<league>/<eventId> -- the league is in the URL because it is
+     not derivable for soccer, where a club's games move between divisions. */
+  if (parts[0] === "games" && parts[1] && parts[2] && parts[3]) {
+    return { name: "game", sport: parts[1], league: parts[2], eventId: parts[3] };
   }
   return { name: "home" };
 }
@@ -241,7 +247,7 @@ async function renderTeam(route) {
       ? `${label} (${record.text})`
       : label;
     const showWeek = team.league === "nfl";
-    scheduleEl.innerHTML = renderGames(games, team.teamId, { showWeek });
+    scheduleEl.innerHTML = renderGames(games, team.teamId, { showWeek, team });
 
     /* Only a season still being played has anything to poll for. */
     const board = mountScoreboard({
@@ -251,6 +257,7 @@ async function renderTeam(route) {
       season: year,
       live: year === current,
       showWeek,
+      team,
     });
     board.start(games);
     teardown = board.stop;
@@ -263,6 +270,172 @@ async function renderTeam(route) {
   document.getElementById("season-nav").innerHTML = seasonNav(team, all, year);
 }
 
+/* One game in full. Sections appear only when the league actually provides
+   them, so the same page serves an NFL box score, an MLB one, and a soccer
+   match with neither a players block nor scoring plays. */
+async function renderGame(route) {
+  const token = ++navToken;
+  document.body.dataset.view = "team";
+  document.title = "Game";
+
+  app.innerHTML = `
+    <header class="page-head page-head--game">
+      <a class="back" href="#/">&larr; Back to Dashboard</a>
+    </header>
+    <div id="game"><p class="loading">Loading game&hellip;</p></div>`;
+
+  const host = document.getElementById("game");
+
+  let payload;
+  try {
+    payload = await getGameSummary(route.sport, route.league, route.eventId);
+  } catch (err) {
+    if (token !== navToken) return;
+    host.innerHTML = `<p class="empty">Could not load this game. ${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  if (token !== navToken) return;
+
+  const head = summaryHeader(payload);
+  if (!head.home || !head.away) {
+    host.innerHTML = '<p class="empty">ESPN has no summary for this game.</p>';
+    return;
+  }
+
+  document.title = `${head.away.name} at ${head.home.name}`;
+
+  const when = head.date ? new Date(head.date) : null;
+  const whenText =
+    when && !Number.isNaN(+when)
+      ? when.toLocaleString(undefined, {
+          weekday: "short", month: "short", day: "numeric",
+          hour: "numeric", minute: "2-digit",
+        })
+      : "";
+
+  const rows = teamStatRows(payload, head.home.id, head.away.id);
+  const groups = playerGroups(payload);
+  const events = timeline(payload);
+
+  host.innerHTML = `
+    <section class="gh">
+      <div class="gh__meta">
+        ${[head.league, whenText, head.venue, head.location].filter(Boolean).map((x) => `<span>${escapeHtml(x)}</span>`).join("")}
+      </div>
+      <div class="gh__teams">
+        ${gameSide(head.away)}
+        <div class="gh__status">
+          ${head.live ? '<span class="dot" aria-hidden="true"></span>' : ""}
+          <span>${escapeHtml(head.statusText)}</span>
+        </div>
+        ${gameSide(head.home)}
+      </div>
+    </section>
+
+    ${
+      events.items.length
+        ? `<section class="gsec">
+             <h2 class="gsec__title">${escapeHtml(events.label)}</h2>
+             <ol class="tl">
+               ${events.items
+                 .map(
+                   (e) => `
+                 <li class="tl__item${e.scoring ? " tl__item--score" : ""}">
+                   <span class="tl__when">${escapeHtml(e.when)}</span>
+                   <span class="tl__text">${escapeHtml(e.text)}${e.team ? ` <span class="tl__team">${escapeHtml(e.team)}</span>` : ""}</span>
+                   <span class="tl__score">${escapeHtml(e.score)}</span>
+                 </li>`
+                 )
+                 .join("")}
+             </ol>
+           </section>`
+        : ""
+    }
+
+    ${
+      rows.length
+        ? `<section class="gsec">
+             <h2 class="gsec__title">Team Stats</h2>
+             <div class="tblwrap">
+               <table class="tbl">
+                 <thead>
+                   <tr>
+                     <th>Stat</th>
+                     <th class="num">${escapeHtml(head.away.abbrev || head.away.name)}</th>
+                     <th class="num">${escapeHtml(head.home.abbrev || head.home.name)}</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   ${rows
+                     .map(
+                       (r) => `
+                     <tr>
+                       <td>${escapeHtml(r.label)}</td>
+                       <td class="num">${escapeHtml(r.away)}</td>
+                       <td class="num">${escapeHtml(r.home)}</td>
+                     </tr>`
+                     )
+                     .join("")}
+                 </tbody>
+               </table>
+             </div>
+           </section>`
+        : ""
+    }
+
+    ${groups.map(playerBlock).join("")}
+
+    ${
+      !rows.length && !groups.length && !events.items.length
+        ? '<p class="empty">ESPN has no box score for this game yet.</p>'
+        : ""
+    }`;
+}
+
+function gameSide(side) {
+  return `
+    <div class="gh__side${side.winner ? " gh__side--win" : ""}">
+      ${side.logo ? `<img class="gh__logo" src="${escapeHtml(side.logo)}" alt="" loading="lazy" />` : ""}
+      <div class="gh__name">${escapeHtml(side.name)}</div>
+      ${side.record ? `<div class="gh__rec">${escapeHtml(side.record)}</div>` : ""}
+      <div class="gh__score">${side.score === null ? "" : escapeHtml(side.score)}</div>
+    </div>`;
+}
+
+function playerBlock(block) {
+  return `
+    <section class="gsec">
+      <h2 class="gsec__title">${escapeHtml(block.team)}</h2>
+      ${block.groups
+        .map(
+          (group) => `
+        <h3 class="gsec__sub">${escapeHtml(group.name)}</h3>
+        <div class="tblwrap">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>Player</th>
+                ${group.labels.map((l) => `<th class="num">${escapeHtml(l)}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>
+              ${group.rows
+                .map(
+                  (row) => `
+                <tr>
+                  <td>${escapeHtml(row.name)}${row.position ? ` <span class="pos">${escapeHtml(row.position)}</span>` : ""}</td>
+                  ${group.labels.map((_, i) => `<td class="num">${escapeHtml(row.stats[i] ?? "—")}</td>`).join("")}
+                </tr>`
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>`
+        )
+        .join("")}
+    </section>`;
+}
+
 function route() {
   if (teardown) {
     teardown();
@@ -271,6 +444,7 @@ function route() {
   const r = parseRoute();
   window.scrollTo(0, 0);
   if (r.name === "team") renderTeam(r);
+  else if (r.name === "game") renderGame(r);
   else renderHome();
 }
 

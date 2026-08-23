@@ -59,7 +59,13 @@ async function fetchGames(team, season, opts = {}) {
       const leagues = team.soccerLeagues || ["eng.2"];
       for (const league of leagues) {
         const games = await getSoccerTeamGames(team.teamId, season, { league, ...opts });
-        if (games.length) return games;
+        if (games.length) {
+          /* Which division answered is not recoverable from the event itself,
+             and a game detail link needs it -- the summary endpoint is per
+             league. Tagging here is the only place that still knows. */
+          for (const game of games) game.leaguePath = league;
+          return games;
+        }
       }
       return [];
     }
