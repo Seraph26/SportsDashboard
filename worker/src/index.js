@@ -15,7 +15,7 @@
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-cups";
+const WORKER_VERSION = "2026-08-23-fixtures";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -57,8 +57,8 @@ const ALLOWED_PATHS = [
    arbitrary requests, and the cache key stays small and predictable. This is
    exactly what the client sends and nothing more: season and seasontype for
    schedules, team and limit for news, event for a game summary, group to narrow
-   standings to one conference. */
-const ALLOWED_PARAMS = ["season", "seasontype", "team", "limit", "event", "group"];
+   standings to one conference, fixture for the unplayed half of a soccer season. */
+const ALLOWED_PARAMS = ["season", "seasontype", "team", "limit", "event", "group", "fixture"];
 
 const API_ROUTES = [
   { prefix: "/espn/", upstream: ESPN_PREFIX, paths: ALLOWED_PATHS },
