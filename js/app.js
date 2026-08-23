@@ -16,6 +16,7 @@ import { renderGames, mountScoreboard } from "./scoreboard.js";
 import { mountCountdown, nextGameInfo } from "./countdown.js";
 import { getGameSummary, summaryHeader, teamStatRows, playerGroups, timeline } from "./gameDetails.js";
 import { getTeamNews } from "./news.js";
+import { getTeamStats } from "./teamStats.js";
 
 const app = document.getElementById("app");
 let teardown = null;      /* stops the previous page's poll */
@@ -31,7 +32,17 @@ function parseRoute() {
   const raw = (location.hash || "#/").replace(/^#\/?/, "");
   const parts = raw.split("/").filter(Boolean);
   if (parts[0] === "teams" && parts[1]) {
-    return { name: "team", team: parts[1], year: parts[2] ? Number(parts[2]) : null };
+    /* #/teams/jets/stats and #/teams/jets/2024/stats -- the year is optional, so
+       the tab is whichever trailing segment is not a number. */
+    const rest = parts.slice(2);
+    const tab = rest[rest.length - 1] === "stats" ? "stats" : "schedule";
+    const yearPart = rest.find((p) => /^\d{4}$/.test(p));
+    return {
+      name: "team",
+      team: parts[1],
+      year: yearPart ? Number(yearPart) : null,
+      tab,
+    };
   }
   /* #/games/<sport>/<league>/<eventId> -- the league is in the URL because it is
      not derivable for soccer, where a club's games move between divisions. */
@@ -157,19 +168,110 @@ function fillDashboard() {
 }
 
 
-function seasonNav(team, seasons, activeYear) {
+/* Season links keep whichever tab you are on, so switching year from the stats
+   tab does not drop you back onto the schedule. */
+function seasonNav(team, seasons, activeYear, tab = "schedule") {
   if (!seasons.length) return "";
+  const suffix = tab === "stats" ? "/stats" : "";
   return `
     <nav class="seasons" aria-label="Season">
       ${seasons
         .map((year) => {
           const active = Number(activeYear) === year;
           return `<a class="season${active ? " season--active" : ""}"
-                     href="#/teams/${team.key}/${year}"
+                     href="#/teams/${team.key}/${year}${suffix}"
                      ${active ? 'aria-current="page"' : ""}>${escapeHtml(team.seasonLabel(year))}</a>`;
         })
         .join("")}
     </nav>`;
+}
+
+/* Schedule | Stats, from the original's TeamTabs. The href keeps the season when
+   one is explicit in the URL, and omits it otherwise so the tab lands on the
+   current season the same way the schedule does. */
+function teamTabs(team, explicitYear, active = "schedule") {
+  const base = `#/teams/${team.key}${explicitYear ? `/${explicitYear}` : ""}`;
+  const tab = (href, label, isActive) =>
+    `<a class="tab${isActive ? " tab--active" : ""}" href="${href}"${isActive ? ' aria-current="page"' : ""}>${label}</a>`;
+  return `
+    <nav class="tabs" aria-label="Team sections">
+      ${tab(base, "Schedule", active !== "stats")}
+      ${tab(`${base}/stats`, "Stats", active === "stats")}
+    </nav>`;
+}
+
+async function renderStatsInto(host, team, year, token, explicitYear = false) {
+  let stats;
+  try {
+    stats = await getTeamStats(team, year);
+    /* Same fallback the schedule uses: an implicit current season with nothing
+       published yet drops to the last season that has something, rather than
+       showing an empty page under a heading that is technically correct. An
+       explicit year stays put, because the visitor asked for that one. */
+    if (stats.missing && !explicitYear) {
+      const previous = await getTeamStats(team, year - 1);
+      if (!previous.missing) {
+        year -= 1;
+        stats = previous;
+      }
+    }
+  } catch (err) {
+    if (token !== navToken) return;
+    host.innerHTML = `<p class="empty">Could not load statistics. ${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  if (token !== navToken) return;
+
+  /* Deliberately not showing ESPN's recordSummary here. For soccer it is W-D-L
+     while record.js computes W-L-T, so Wrexham's season reads "0-2-0" on this
+     tab and "0-0-2" on the schedule -- the same season, two different numbers,
+     one screen apart. A heading without a record beats a contradiction. */
+  document.getElementById("record").textContent = `${team.seasonLabel(year)} Season`;
+  /* The fallback above may have moved the year since the title was written. */
+  document.title = `${team.name} — ${team.seasonLabel(year)}`;
+
+  if (stats.missing) {
+    host.innerHTML =
+      '<p class="empty">ESPN has published no statistics for this season yet.</p>';
+    return;
+  }
+
+  if (!stats.supported) {
+    host.innerHTML =
+      '<p class="empty">ESPN publishes no team statistics for this league.</p>';
+    return;
+  }
+
+  host.innerHTML = stats.categories
+    .map((cat) => {
+      /* MLB's payload carries no per-game figures at all, so that column would
+         be nothing but em-dashes. Show it only where the data exists. */
+      const hasPerGame = cat.stats.some((s) => s.perGame);
+      return `
+    <section class="gsec">
+      <h2 class="gsec__title">${escapeHtml(cat.name)}</h2>
+      <div class="tblwrap">
+        <table class="tbl">
+          <thead>
+            <tr><th>Stat</th><th class="num">Total</th>${hasPerGame ? '<th class="num">Per game</th>' : ""}</tr>
+          </thead>
+          <tbody>
+            ${cat.stats
+              .map(
+                (s) => `
+              <tr${s.description ? ` title="${escapeHtml(s.description)}"` : ""}>
+                <td>${escapeHtml(s.label)}</td>
+                <td class="num">${escapeHtml(s.value)}</td>
+                ${hasPerGame ? `<td class="num">${escapeHtml(s.perGame || "—")}</td>` : ""}
+              </tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
+    })
+    .join("");
 }
 
 async function renderTeam(route) {
@@ -204,10 +306,22 @@ async function renderTeam(route) {
         </div>
       </div>
       <div id="season-nav"></div>
+      ${teamTabs(team, route.year, route.tab)}
     </header>
-    <div id="schedule"><p class="loading">Loading schedule&hellip;</p></div>`;
+    <div id="schedule"><p class="loading">Loading&hellip;</p></div>`;
 
   const scheduleEl = document.getElementById("schedule");
+
+  /* The stats tab shares this page's header, season nav and record, so it
+     branches here rather than being a page of its own. */
+  if (route.tab === "stats") {
+    renderStatsInto(scheduleEl, team, year, token, Boolean(route.year));
+    const seasons = await getAvailableSeasons(team.key).catch(() => []);
+    if (token !== navToken) return;
+    const all = [...new Set([...seasons, year])].sort((a, b) => b - a);
+    document.getElementById("season-nav").innerHTML = seasonNav(team, all, year, "stats");
+    return;
+  }
 
   /* Seasons and games are independent, so they go out together rather than the
      schedule waiting on a dozen probe requests. */

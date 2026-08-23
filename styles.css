@@ -384,3 +384,16 @@ a { color: inherit; text-decoration: none; }
    the timeline is context. */
 .tl__item--score { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .tl__item--score .tl__text { font-weight: 500; }
+
+/* Schedule | Stats tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.tab {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.tab:hover { color: var(--text); border-color: var(--accent); }
+.tab--active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
