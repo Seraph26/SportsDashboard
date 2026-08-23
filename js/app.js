@@ -18,6 +18,7 @@ import { getGameSummary, summaryHeader, teamStatRows, playerGroups, timeline } f
 import { getTeamNews } from "./news.js";
 import { getTeamStats } from "./teamStats.js";
 import { getStandings } from "./standings.js";
+import { getRoster, getPlayer } from "./roster.js";
 
 const app = document.getElementById("app");
 let teardown = null;      /* stops the previous page's poll */
@@ -36,8 +37,14 @@ function parseRoute() {
     /* #/teams/jets/stats and #/teams/jets/2024/stats -- the year is optional, so
        the tab is whichever trailing segment is not a number. */
     const rest = parts.slice(2);
+    /* #/teams/jets/player/4685247 -- a player belongs to a team, so it hangs off
+       the team route the way the original's /teams/[team]/player/[id] did. */
+    const playerAt = rest.indexOf("player");
+    if (playerAt !== -1 && rest[playerAt + 1]) {
+      return { name: "player", team: parts[1], playerId: rest[playerAt + 1] };
+    }
     const last = rest[rest.length - 1];
-    const tab = last === "stats" || last === "standings" ? last : "schedule";
+    const tab = ["stats", "standings", "roster"].includes(last) ? last : "schedule";
     const yearPart = rest.find((p) => /^\d{4}$/.test(p));
     return {
       name: "team",
@@ -200,7 +207,150 @@ function teamTabs(team, explicitYear, active = "schedule") {
       ${tab(base, "Schedule", active === "schedule")}
       ${tab(`${base}/stats`, "Stats", active === "stats")}
       ${tab(`${base}/standings`, "Standings", active === "standings")}
+      ${tab(`#/teams/${team.key}/roster`, "Roster", active === "roster")}
     </nav>`;
+}
+
+async function renderRosterInto(host, team, year, token) {
+  let roster;
+  try {
+    roster = await getRoster(team);
+  } catch (err) {
+    if (token !== navToken) return;
+    host.innerHTML = `<p class="empty">Could not load the roster. ${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  if (token !== navToken) return;
+
+  document.getElementById("record").textContent = `${team.seasonLabel(year)} Season`;
+  document.title = `${team.name} — Roster`;
+
+  if (!roster.groups.length) {
+    host.innerHTML = '<p class="empty">ESPN has no roster for this team.</p>';
+    return;
+  }
+
+  host.innerHTML = roster.groups
+    .map(
+      (group) => `
+    <section class="gsec">
+      ${group.name ? `<h2 class="gsec__title">${escapeHtml(group.name)}</h2>` : ""}
+      <div class="roster">
+        ${group.players
+          .map(
+            (p) => `
+          <a class="pl" href="#/teams/${escapeHtml(team.key)}/player/${escapeHtml(p.id)}">
+            ${
+              p.headshot
+                ? `<img class="pl__face" src="${escapeHtml(p.headshot)}" alt="" loading="lazy" />`
+                : '<span class="pl__face pl__face--none" aria-hidden="true"></span>'
+            }
+            <span class="pl__body">
+              <span class="pl__name">${escapeHtml(p.name)}</span>
+              <span class="pl__meta">${escapeHtml(
+                [p.jersey ? `#${p.jersey}` : "", p.positionAbbrev || p.position]
+                  .filter(Boolean)
+                  .join(" · "),
+              )}</span>
+            </span>
+          </a>`
+          )
+          .join("")}
+      </div>
+    </section>`
+    )
+    .join("");
+}
+
+async function renderPlayer(route) {
+  const token = ++navToken;
+  document.body.dataset.view = "team";
+  const team = getTeam(route.team);
+  if (!team) {
+    app.innerHTML = `<p class="empty">Unknown team: ${escapeHtml(route.team)}. <a href="#/">Back to Dashboard</a></p>`;
+    return;
+  }
+
+  app.innerHTML = `
+    <header class="page-head page-head--game">
+      <a class="back" href="#/teams/${escapeHtml(team.key)}/roster">&larr; Back to ${escapeHtml(team.name)} roster</a>
+    </header>
+    <div id="player"><p class="loading">Loading&hellip;</p></div>`;
+
+  const host = document.getElementById("player");
+
+  let player;
+  try {
+    player = await getPlayer(team, route.playerId);
+  } catch (err) {
+    if (token !== navToken) return;
+    host.innerHTML = `<p class="empty">Could not load this player. ${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  if (token !== navToken) return;
+
+  if (!player) {
+    host.innerHTML = '<p class="empty">No such player on this roster.</p>';
+    return;
+  }
+
+  document.title = `${player.name} — ${team.name}`;
+
+  const facts = [
+    ["Position", player.position],
+    ["Number", player.jersey ? `#${player.jersey}` : ""],
+    ["Height", player.height],
+    ["Weight", player.weight],
+    ["Age", player.age === null ? "" : String(player.age)],
+    ["Birthplace", player.birthPlace],
+    ["College", player.college],
+    [
+      "Experience",
+      player.experience === null
+        ? ""
+        : player.experience === 0
+          ? "Rookie"
+          : `${player.experience} yr${player.experience === 1 ? "" : "s"}`,
+    ],
+    ["Status", player.status],
+  ].filter(([, value]) => value);
+
+  host.innerHTML = `
+    <section class="ph" style="--accent:${team.accent}">
+      ${
+        player.headshot
+          ? `<img class="ph__face" src="${escapeHtml(player.headshot)}" alt="" />`
+          : ""
+      }
+      <div class="ph__body">
+        <h1 class="ph__name">${escapeHtml(player.name)}</h1>
+        <p class="ph__sub">${escapeHtml(
+          [team.name, player.positionAbbrev || player.position, player.jersey ? `#${player.jersey}` : ""]
+            .filter(Boolean)
+            .join(" · "),
+        )}</p>
+        ${
+          player.link
+            ? `<a class="team-site" href="${escapeHtml(player.link)}" target="_blank" rel="noreferrer noopener">ESPN player card &nearr;</a>`
+            : ""
+        }
+      </div>
+    </section>
+
+    <section class="gsec">
+      <div class="tblwrap">
+        <table class="tbl">
+          <tbody>
+            ${facts
+              .map(
+                ([label, value]) => `
+              <tr><td>${escapeHtml(label)}</td><td class="num">${escapeHtml(value)}</td></tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
 }
 
 async function renderStandingsInto(host, team, year, token) {
@@ -375,9 +525,15 @@ async function renderTeam(route) {
   if (route.tab !== "schedule") {
     if (route.tab === "stats") {
       renderStatsInto(scheduleEl, team, year, token, Boolean(route.year));
+    } else if (route.tab === "roster") {
+      renderRosterInto(scheduleEl, team, year, token);
     } else {
       renderStandingsInto(scheduleEl, team, year, token);
     }
+    /* The roster is whoever is on the team now -- ESPN has no per-season roster
+       here -- so offering season links on that tab would promise history the
+       data does not have. */
+    if (route.tab === "roster") return;
     const seasons = await getAvailableSeasons(team.key).catch(() => []);
     if (token !== navToken) return;
     const all = [...new Set([...seasons, year])].sort((a, b) => b - a);
@@ -621,6 +777,7 @@ function route() {
   window.scrollTo(0, 0);
   if (r.name === "team") renderTeam(r);
   else if (r.name === "game") renderGame(r);
+  else if (r.name === "player") renderPlayer(r);
   else renderHome();
 }
 
