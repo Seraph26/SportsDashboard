@@ -41,9 +41,14 @@ Hash routes, not paths. GitHub Pages has no rewrite rules, so `/teams/jets/2024`
 would 404 on a refresh; `#/teams/jets/2024` survives a reload and needs no
 server.
 
-    #/                 dashboard
-    #/teams/jets       current season
-    #/teams/jets/2024  a specific season
+    #/                          dashboard
+    #/teams/jets                current season schedule
+    #/teams/jets/2024           a specific season
+    #/teams/jets/stats          season team statistics
+    #/teams/jets/standings      league table
+    #/teams/jets/roster         roster
+    #/teams/jets/player/4685247 one player
+    #/games/football/nfl/401671696   one game
 
 ## Files
 
@@ -58,6 +63,10 @@ server.
     js/scoreboard.js    the list, plus the 15s live poll
     js/news.js          team headlines from ESPN's news endpoint
     js/countdown.js     next-game countdown on the dashboard
+    js/gameDetails.js   one game: box score, player tables, scoring timeline
+    js/teamStats.js     season team statistics
+    js/standings.js     league tables
+    js/roster.js        roster and player pages
     js/app.js           router and pages
     worker/src/index.js Cloudflare proxy
 
