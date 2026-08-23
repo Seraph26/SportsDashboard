@@ -15,7 +15,7 @@
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-initial";
+const WORKER_VERSION = "2026-08-23-ua-fix";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -134,9 +134,13 @@ export default {
         res = await fetch(upstream.toString(), {
           headers: {
             Accept: "application/json",
-            /* ESPN's edge rejects some non-browser user agents outright with an
-               Akamai "Access Denied" page, so send a plain browser-ish one. */
-            "User-Agent": "Mozilla/5.0 (compatible; SportsDashboard/1.0)",
+            /* ESPN's edge is fronted by Akamai bot detection, which allows
+               well-known honest client user agents (curl, python-requests,
+               Go-http-client) and 403s anything claiming to be a browser
+               without the TLS fingerprint to match. A half-browser string like
+               "Mozilla/5.0 (compatible; SportsDashboard/1.0)" is the worst
+               case: browser-shaped, unrecognised, blocked every time. */
+            "User-Agent": "curl/8.7.1",
           },
         });
       } catch (err) {

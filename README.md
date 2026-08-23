@@ -78,9 +78,16 @@ server.
   fixture. `espnService` sorts everything on the way in.
 - **Out-of-range seasons return an empty list, not an error.** That is what makes
   `getAvailableSeasons` able to probe safely.
-- **ESPN's edge blocks some user agents** with an Akamai "Access Denied" page —
-  PowerShell's `Invoke-RestMethod` default UA is one. Browsers are fine; the
-  worker sends a browser-ish UA for the same reason.
+- **ESPN's edge 403s browser-shaped user agents from non-browsers.** Akamai
+  allowlists honest client UAs — `curl/8.7.1`, `python-requests/2.31.0` and
+  `Go-http-client/2.0` all return `200` — and blocks anything that claims to be
+  a browser without the TLS fingerprint to match. A full Chrome UA, no UA at
+  all, and the half-browser `Mozilla/5.0 (compatible; SportsDashboard/1.0)` the
+  worker originally sent are all `403`. **Do not "fix" the worker by making its
+  UA more browser-like; that is the thing being blocked.** It sends `curl/8.7.1`
+  deliberately. Real browsers calling ESPN directly are unaffected — this only
+  bites server-side callers, which is why the bug appeared the moment the worker
+  went live and never in direct mode.
 - **A team's *current* season can legitimately be empty.** In August, college
   basketball's 2026-27 exists as a season number with no schedule posted. The
   team page falls back to the last season actually played rather than showing an
