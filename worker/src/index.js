@@ -37,14 +37,14 @@ const ALLOWED_PATHS = [
   /^basketball\/mens-college-basketball\/teams\/\d+\/schedule$/,
   /^soccer\/[a-z]{3}\.\d+\/teams\/\d+\/schedule$/,
   /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/teams$/,
+  /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/news$/,
 ];
 
 /* Only these query parameters reach ESPN, so the proxy cannot be used to smuggle
    arbitrary requests, and the cache key stays small and predictable. This is
-   exactly what espnService sends and nothing more -- "limit" was allowed here
-   originally but no call site ever set it, and an unused allowlist entry is
-   surface with no payer. */
-const ALLOWED_PARAMS = ["season", "seasontype"];
+   exactly what the client sends and nothing more: season and seasontype for
+   schedules, team and limit for news. */
+const ALLOWED_PARAMS = ["season", "seasontype", "team", "limit"];
 
 /* A finished season never changes; a live one changes every few seconds. The
    client polls every 15s, so caching a current-season response for 15s means a
@@ -52,144 +52,14 @@ const ALLOWED_PARAMS = ["season", "seasontype"];
 const CACHE_LIVE_SECONDS = 15;
 const CACHE_ARCHIVE_SECONDS = 60 * 60 * 6;
 
-/* --- Team news -------------------------------------------------------------
-
-   The original Next.js dashboard fetched Google News RSS server-side, which is
-   why news did not survive the static rebuild: news.google.com sends no CORS
-   headers, so a browser cannot fetch it at all. The worker is now that server.
-
-   The query strings live here rather than being passed in, for the same reason
-   the ESPN paths are an allowlist: a proxy that forwards an arbitrary caller
-   query to Google is a general-purpose search proxy, and this is not one. Four
-   keys, four fixed queries.
-
-   Feeds are cached 15 minutes, matching the revalidate window the original
-   used -- headlines do not move faster than that and every visitor shares one
-   fetch per team. */
-const NEWS_QUERIES = {
-  jets: "New York Jets NFL",
-  mets: "New York Mets MLB",
-  wrexham: "Wrexham soccer",
-  providence: "Providence Friars basketball",
-};
-const NEWS_ORIGIN = "https://news.google.com";
+/* News is just another ESPN path -- see ALLOWED_PATHS. It was first built as a
+   Google News RSS proxy, because that is what the original Next.js app used,
+   but Google answers 503 to Cloudflare's ranges (every UA works from a
+   residential IP, so the block is by address, not user agent). ESPN's own
+   /news?team= endpoint carries genuinely team-filtered headlines, sits on the
+   host already allowlisted here, and sends CORS, so it also works with the
+   worker switched off. One source, no second upstream, no RSS parsing. */
 const NEWS_CACHE_SECONDS = 15 * 60;
-const NEWS_LIMIT = 6;
-
-function allowedOrigin(request) {
-  const origin = request.headers.get("Origin");
-  return origin && ALLOWED_ORIGINS.has(origin) ? origin : null;
-}
-
-function corsHeaders(origin) {
-  return {
-    /* Echo the single origin that asked, never "*", and Vary so a response
-       cached for one origin is not handed to another. */
-    "Access-Control-Allow-Origin": origin || "https://seraph26.github.io",
-    Vary: "Origin",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Accept",
-  };
-}
-
-function json(body, { status = 200, origin, cacheSeconds = 0 } = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": cacheSeconds
-        ? `public, max-age=${cacheSeconds}, s-maxage=${cacheSeconds}`
-        : "no-store",
-      ...corsHeaders(origin),
-    },
-  });
-}
-
-/* RSS parsing, ported from the original lib/newsService.ts. Regex rather than a
-   parser because Workers have no DOMParser and a feed is a flat, predictable
-   shape -- and because this is the same code that already worked. */
-function extractTag(xml, tag) {
-  const match = xml.match(new RegExp(`<${tag}[^>]*>([\s\S]*?)<\/${tag}>`, "i"));
-  return (match && match[1] ? match[1] : "").trim();
-}
-
-function stripTags(value) {
-  return value.replace(/<[^>]+>/g, "").trim();
-}
-
-function decodeEntities(value) {
-  return value
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/gi, "'")
-    .replace(/&#x2F;/gi, "/")
-    /* &amp; last, so "&amp;lt;" does not decode twice into a real tag. */
-    .replace(/&amp;/g, "&");
-}
-
-function parseNewsFeed(xml) {
-  const items = [];
-  for (const match of xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)) {
-    const block = match[1] || "";
-    const title = decodeEntities(stripTags(extractTag(block, "title")));
-    const url = decodeEntities(stripTags(extractTag(block, "link")));
-    if (!title || !url) continue;
-    items.push({
-      title,
-      url,
-      source: decodeEntities(stripTags(extractTag(block, "source"))) || undefined,
-      publishedAt: decodeEntities(stripTags(extractTag(block, "pubDate"))) || undefined,
-    });
-  }
-  return items;
-}
-
-async function handleNews(teamKey, origin, ctx) {
-  const query = NEWS_QUERIES[teamKey];
-  if (!query) {
-    return json({ error: "unknown team" }, { status: 404, origin });
-  }
-
-  const upstream = `${NEWS_ORIGIN}/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
-  const cacheKey = new Request(upstream, { method: "GET" });
-  const cache = caches.default;
-
-  const hit = await cache.match(cacheKey);
-  if (hit) {
-    return json(await hit.json(), { origin, cacheSeconds: NEWS_CACHE_SECONDS });
-  }
-
-  let res;
-  try {
-    res = await fetch(upstream, {
-      headers: { Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8" },
-    });
-  } catch (err) {
-    return json({ error: "news upstream unreachable" }, { status: 502, origin });
-  }
-  if (!res.ok) {
-    return json({ error: `news upstream ${res.status}` }, { status: 502, origin });
-  }
-
-  const items = parseNewsFeed(await res.text()).slice(0, NEWS_LIMIT);
-  const payload = { team: teamKey, items };
-
-  ctx.waitUntil(
-    cache.put(
-      cacheKey,
-      new Response(JSON.stringify(payload), {
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": `public, max-age=${NEWS_CACHE_SECONDS}`,
-        },
-      }),
-    ),
-  );
-
-  return json(payload, { origin, cacheSeconds: NEWS_CACHE_SECONDS });
-}
 
 export default {
   async fetch(request, env, ctx) {
@@ -207,10 +77,6 @@ export default {
     }
     if (!origin) {
       return json({ error: "origin not allowed" }, { status: 403, origin });
-    }
-    /* Team news. Behind the same origin gate as everything else. */
-    if (url.pathname.startsWith("/news/")) {
-      return handleNews(url.pathname.slice("/news/".length), origin, ctx);
     }
 
     if (!url.pathname.startsWith("/espn/")) {
@@ -234,7 +100,15 @@ export default {
        explicit past season can sit in the cache for hours. "Current" here is
        decided by the absence of the parameter, which is how the client asks. */
     const isArchive = upstream.searchParams.has("season");
-    const cacheSeconds = isArchive ? CACHE_ARCHIVE_SECONDS : CACHE_LIVE_SECONDS;
+    /* News is neither: it has no season, so the schedule rule would give it the
+       15s live TTL, which is far too eager for headlines that turn over a few
+       times a day. */
+    const isNews = path.endsWith("/news");
+    const cacheSeconds = isNews
+      ? NEWS_CACHE_SECONDS
+      : isArchive
+        ? CACHE_ARCHIVE_SECONDS
+        : CACHE_LIVE_SECONDS;
 
     /* Cache on the upstream URL, not the incoming one, so two origins asking
        for the same season share a single cached copy. */
