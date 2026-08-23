@@ -85,6 +85,10 @@ export const teamConfig = {
     path: "mens-college-basketball",
     accent: "#000000",
     logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2507.png",
+    /* ESPN's college basketball standings return all of Division I -- 6 MB --
+       unless narrowed to a conference. 4 is the Big East, which is where the
+       team's own payload says it plays (groups.id). */
+    standingsGroup: "4",
     website: "https://friars.com/",
     streams: [
       { label: "LIVE STREAM 1", url: "https://freestreams-live1b.pk/ncaa-basketball-streams/" },

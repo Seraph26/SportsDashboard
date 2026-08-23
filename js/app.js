@@ -17,6 +17,7 @@ import { mountCountdown, nextGameInfo } from "./countdown.js";
 import { getGameSummary, summaryHeader, teamStatRows, playerGroups, timeline } from "./gameDetails.js";
 import { getTeamNews } from "./news.js";
 import { getTeamStats } from "./teamStats.js";
+import { getStandings } from "./standings.js";
 
 const app = document.getElementById("app");
 let teardown = null;      /* stops the previous page's poll */
@@ -35,7 +36,8 @@ function parseRoute() {
     /* #/teams/jets/stats and #/teams/jets/2024/stats -- the year is optional, so
        the tab is whichever trailing segment is not a number. */
     const rest = parts.slice(2);
-    const tab = rest[rest.length - 1] === "stats" ? "stats" : "schedule";
+    const last = rest[rest.length - 1];
+    const tab = last === "stats" || last === "standings" ? last : "schedule";
     const yearPart = rest.find((p) => /^\d{4}$/.test(p));
     return {
       name: "team",
@@ -172,7 +174,7 @@ function fillDashboard() {
    tab does not drop you back onto the schedule. */
 function seasonNav(team, seasons, activeYear, tab = "schedule") {
   if (!seasons.length) return "";
-  const suffix = tab === "stats" ? "/stats" : "";
+  const suffix = tab === "schedule" ? "" : `/${tab}`;
   return `
     <nav class="seasons" aria-label="Season">
       ${seasons
@@ -195,9 +197,65 @@ function teamTabs(team, explicitYear, active = "schedule") {
     `<a class="tab${isActive ? " tab--active" : ""}" href="${href}"${isActive ? ' aria-current="page"' : ""}>${label}</a>`;
   return `
     <nav class="tabs" aria-label="Team sections">
-      ${tab(base, "Schedule", active !== "stats")}
+      ${tab(base, "Schedule", active === "schedule")}
       ${tab(`${base}/stats`, "Stats", active === "stats")}
+      ${tab(`${base}/standings`, "Standings", active === "standings")}
     </nav>`;
+}
+
+async function renderStandingsInto(host, team, year, token) {
+  let table;
+  try {
+    table = await getStandings(team, year);
+  } catch (err) {
+    if (token !== navToken) return;
+    host.innerHTML = `<p class="empty">Could not load standings. ${escapeHtml(err.message)}</p>`;
+    return;
+  }
+  if (token !== navToken) return;
+
+  document.getElementById("record").textContent = `${team.seasonLabel(year)} Season`;
+  document.title = `${team.name} — Standings`;
+
+  if (!table.groups.length) {
+    host.innerHTML = '<p class="empty">ESPN has no standings for this season.</p>';
+    return;
+  }
+
+  host.innerHTML = table.groups
+    .map(
+      (group) => `
+    <section class="gsec">
+      ${table.groups.length > 1 ? `<h2 class="gsec__title">${escapeHtml(group.name)}</h2>` : ""}
+      <div class="tblwrap">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Team</th>
+              ${table.columns.map((c) => `<th class="num">${escapeHtml(c.label)}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${group.entries
+              .map(
+                (e, i) => `
+              <tr${String(e.id) === String(team.teamId) ? ' class="row--us"' : ""}>
+                <td class="num">${e.rank ?? i + 1}</td>
+                <td>
+                  ${e.logo ? `<img class="row__logo" src="${escapeHtml(e.logo)}" alt="" loading="lazy" />` : ""}
+                  ${escapeHtml(e.name)}
+                </td>
+                ${table.columns.map((c) => `<td class="num">${escapeHtml(e.cells[c.name] ?? "—")}</td>`).join("")}
+              </tr>`
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>`
+    )
+    .join("");
 }
 
 async function renderStatsInto(host, team, year, token, explicitYear = false) {
@@ -314,12 +372,16 @@ async function renderTeam(route) {
 
   /* The stats tab shares this page's header, season nav and record, so it
      branches here rather than being a page of its own. */
-  if (route.tab === "stats") {
-    renderStatsInto(scheduleEl, team, year, token, Boolean(route.year));
+  if (route.tab !== "schedule") {
+    if (route.tab === "stats") {
+      renderStatsInto(scheduleEl, team, year, token, Boolean(route.year));
+    } else {
+      renderStandingsInto(scheduleEl, team, year, token);
+    }
     const seasons = await getAvailableSeasons(team.key).catch(() => []);
     if (token !== navToken) return;
     const all = [...new Set([...seasons, year])].sort((a, b) => b - a);
-    document.getElementById("season-nav").innerHTML = seasonNav(team, all, year, "stats");
+    document.getElementById("season-nav").innerHTML = seasonNav(team, all, year, route.tab);
     return;
   }
 
