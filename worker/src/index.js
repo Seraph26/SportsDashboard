@@ -15,7 +15,7 @@
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-status-params";
+const WORKER_VERSION = "2026-08-23-status-4xx";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -149,12 +149,16 @@ export default {
       } catch (err) {
         return json({ error: "upstream unreachable" }, { status: 502, origin });
       }
-      /* Relay a genuine "no such thing" as 404 instead of flattening every
-         upstream failure into 502. A bad team id or division is a caller
-         mistake and should not read as a gateway fault; everything else --
-         5xx, rate limiting, an ESPN outage -- really is one. */
-      if (res.status === 404) {
-        return json({ error: "not found upstream" }, { status: 404, origin });
+      /* Don't flatten every upstream failure into 502: a caller mistake and an
+         ESPN outage want different reactions, and 502 tells you it was theirs.
+         Relay 4xx with its own status, keep 502 for 5xx and network faults.
+
+         ESPN never answers 404 for a bad team id -- measured 2026-08-23, it is
+         400 for nfl/mlb and 500 for soccer, so a bogus soccer id is genuinely
+         indistinguishable from an outage here and will read as 502. Don't add
+         a 404 branch expecting it to fire; it will not. */
+      if (res.status >= 400 && res.status < 500) {
+        return json({ error: `upstream ${res.status}` }, { status: res.status, origin });
       }
       if (!res.ok) {
         return json({ error: `upstream ${res.status}` }, { status: 502, origin });
