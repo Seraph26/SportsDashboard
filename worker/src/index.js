@@ -15,7 +15,7 @@
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-standings";
+const WORKER_VERSION = "2026-08-23-roster";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -50,6 +50,7 @@ const ALLOWED_PATHS = [
   /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/news$/,
   /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/summary$/,
   /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/teams\/\d+\/statistics$/,
+  /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/teams\/\d+\/roster$/,
 ];
 
 /* Only these query parameters reach ESPN, so the proxy cannot be used to smuggle
