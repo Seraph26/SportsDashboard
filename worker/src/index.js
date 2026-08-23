@@ -11,10 +11,9 @@
 
    What it deliberately is not: a general proxy. It forwards GET only, to two
    ESPN hosts under three known path prefixes, for an allowlisted set of sports,
-   and only for
-   the origins that are actually this app. The Lost Ark connector was briefly a
-   free public proxy because it answered "*" to everyone; this one does not
-   repeat that. */
+   and only for the origins that are actually this app. The Lost Ark connector
+   was briefly a free public proxy because it answered "*" to everyone; this one
+   does not repeat that. */
 
 const WORKER_VERSION = "2026-08-23-core";
 const ESPN_ORIGIN = "https://site.api.espn.com";

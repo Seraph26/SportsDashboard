@@ -25,13 +25,18 @@ const ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports";
    /espn2/ rather than /espn/, so both modes need to know which one a path wants
    -- pass { api: "v2" } for standings and nothing for everything else. */
 const ESPN_BASE_V2 = "https://site.api.espn.com/apis/v2/sports";
+/* The core API is a different ESPN service on a different host, carrying things
+   site.api does not -- soccer team statistics, for one. */
+const ESPN_BASE_CORE = "https://sports.core.api.espn.com/v2/sports";
+
+const BASES = { site: ESPN_BASE, v2: ESPN_BASE_V2, core: ESPN_BASE_CORE };
+const PREFIXES = { site: "espn", v2: "espn2", core: "espncore" };
 
 export function espnUrl(path, params = {}, { api = "site" } = {}) {
   const clean = path.replace(/^\//, "");
-  const v2 = api === "v2";
   const base = WORKER_BASE
-    ? `${WORKER_BASE.replace(/\/$/, "")}/${v2 ? "espn2" : "espn"}/${clean}`
-    : `${v2 ? ESPN_BASE_V2 : ESPN_BASE}/${clean}`;
+    ? `${WORKER_BASE.replace(/\/$/, "")}/${PREFIXES[api] || PREFIXES.site}/${clean}`
+    : `${BASES[api] || BASES.site}/${clean}`;
   const url = new URL(base);
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));

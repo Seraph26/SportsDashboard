@@ -23,10 +23,14 @@ export async function getTeamStats(team, season, { seasonType, signal } = {}) {
   const key = `${team.key}:${season ?? "current"}:${seasonType ?? "any"}`;
   if (cache.has(key)) return cache.get(key);
 
-  const league = team.league === "soccer"
-    ? (team.soccerLeagues && team.soccerLeagues[0]) || "eng.2"
-    : team.path;
-  const path = `${team.sport}/${league}/teams/${team.teamId}/statistics`;
+  /* Soccer goes to the core API instead. site.api answers 200 with an empty
+     results:{} for every soccer season tried, while the core API has a full set
+     -- expected goals, accurate passes, big chances, ratings. Different host,
+     different URL shape, and the season is a path segment rather than a query
+     parameter. */
+  if (team.league === "soccer") return getSoccerStats(team, season, key, { signal });
+
+  const path = `${team.sport}/${team.path}/teams/${team.teamId}/statistics`;
 
   const res = await fetch(espnUrl(path, { season, seasontype: seasonType }), {
     signal,
@@ -81,5 +85,60 @@ export async function getTeamStats(team, season, { seasonType, signal } = {}) {
     seasonLabel: data?.requestedSeason?.displayName || data?.season?.displayName || "",
   };
   cache.set(key, result);
+  return result;
+}
+
+/* Soccer, via the core API. The shape differs from site.api: categories hang
+   off splits rather than results.stats, and there is no per-game figure at all,
+   so that column never appears for a soccer team. Season type 1 is the only one
+   these are filed under. */
+async function getSoccerStats(team, season, cacheKey, { signal } = {}) {
+  const league = (team.soccerLeagues && team.soccerLeagues[0]) || "eng.2";
+  const year = season || new Date().getUTCFullYear();
+  const path = `soccer/leagues/${league}/seasons/${year}/types/1/teams/${team.teamId}/statistics`;
+
+  const res = await fetch(espnUrl(path, {}, { api: "core" }), {
+    signal,
+    headers: { Accept: "application/json" },
+  });
+  if (res.status === 404) {
+    const miss = {
+      categories: [],
+      supported: false,
+      missing: true,
+      preseason: false,
+      record: "",
+      seasonLabel: "",
+    };
+    cache.set(cacheKey, miss);
+    return miss;
+  }
+  if (!res.ok) throw new Error(`ESPN ${res.status} for soccer statistics`);
+
+  const data = await res.json();
+  const categories = (data?.splits?.categories || [])
+    .map((cat) => ({
+      name: cat.displayName || cat.name || "",
+      stats: (cat.stats || [])
+        .map((s) => ({
+          label: s.displayName || s.shortDisplayName || s.name || "",
+          abbrev: s.shortDisplayName || s.abbreviation || "",
+          value: s.displayValue ?? (s.value === undefined ? "" : String(s.value)),
+          perGame: "",
+          description: s.description || "",
+        }))
+        .filter((s) => s.label),
+    }))
+    .filter((cat) => cat.stats.length);
+
+  const result = {
+    categories,
+    missing: false,
+    preseason: false,
+    supported: categories.length > 0,
+    record: "",
+    seasonLabel: "",
+  };
+  cache.set(cacheKey, result);
   return result;
 }
