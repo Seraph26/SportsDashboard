@@ -35,20 +35,36 @@ export function getNFLTeamGames(teamId, season, { seasonType = 2, signal } = {})
   }, { signal });
 }
 
-export function getMLBTeamGames(teamId, season, { signal } = {}) {
-  return fetchSchedule(`baseball/mlb/teams/${teamId}/schedule`, { season }, { signal });
+export function getMLBTeamGames(teamId, season, { seasonType, signal } = {}) {
+  return fetchSchedule(
+    `baseball/mlb/teams/${teamId}/schedule`,
+    { season, seasontype: season ? seasonType : undefined },
+    { signal },
+  );
 }
 
-export function getNCAABTeamGames(teamId, season, { signal } = {}) {
+export function getNCAABTeamGames(teamId, season, { seasonType, signal } = {}) {
   return fetchSchedule(
     `basketball/mens-college-basketball/teams/${teamId}/schedule`,
-    { season },
+    { season, seasontype: season ? seasonType : undefined },
     { signal }
   );
 }
 
 /* Soccer has no single league path for a club that moves between divisions, so
-   the caller passes the division to try. teamData walks the candidate list. */
-export function getSoccerTeamGames(teamId, season, { league = "eng.2", signal } = {}) {
-  return fetchSchedule(`soccer/${league}/teams/${teamId}/schedule`, { season }, { signal });
+   the caller passes the division to try. teamData walks the candidate list.
+
+   fixture: ESPN splits a soccer season across two answers from this same URL.
+   The plain call returns only matches already played -- two, in August of a
+   Championship season -- and `fixture=true` returns only the ones still to come,
+   44 of them, with no scores. Neither is the season; the union is. This is
+   undocumented and is the reason the schedule looked empty from September
+   onward. It is a no-op for the other three leagues, which answer identically
+   either way. */
+export function getSoccerTeamGames(teamId, season, { league = "eng.2", fixture = false, signal } = {}) {
+  return fetchSchedule(
+    `soccer/${league}/teams/${teamId}/schedule`,
+    { season, fixture: fixture ? "true" : undefined },
+    { signal },
+  );
 }

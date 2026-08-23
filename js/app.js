@@ -12,7 +12,7 @@
 import { teamList, getTeam } from "./teamConfig.js";
 import { getTeamGames, getAvailableSeasons, currentSeason } from "./teamData.js";
 import { getTeamRecord } from "./record.js";
-import { renderGames, mountScoreboard } from "./scoreboard.js";
+import { renderGames, mountScoreboard, latestGameIndex } from "./scoreboard.js";
 import { mountCountdown, nextGameInfo } from "./countdown.js";
 import { getGameSummary, summaryHeader, teamStatRows, playerGroups, timeline } from "./gameDetails.js";
 import { getTeamNews } from "./news.js";
@@ -81,13 +81,13 @@ function renderHome() {
         .map(
           (team) => `
         <div class="col" data-team="${escapeHtml(team.key)}">
-          <section class="card card--team" style="--accent:${team.accent}">
+          <a class="card card--team" href="#/teams/${escapeHtml(team.key)}" style="--accent:${team.accent}">
             <img class="card__watermark" src="${escapeHtml(team.logo)}" alt="" aria-hidden="true" loading="lazy" />
             <div class="card__body">
-              <a class="team-link" href="#/teams/${escapeHtml(team.key)}">${escapeHtml(team.name)}</a>
+              <span class="team-link">${escapeHtml(team.name)}</span>
               <div class="countdown" data-countdown></div>
             </div>
-          </section>
+          </a>
 
           <section class="card">
             <h2 class="card__label">Latest News</h2>
@@ -208,7 +208,41 @@ function teamTabs(team, explicitYear, active = "schedule") {
       ${tab(`${base}/stats`, "Stats", active === "stats")}
       ${tab(`${base}/standings`, "Standings", active === "standings")}
       ${tab(`#/teams/${team.key}/roster`, "Roster", active === "roster")}
+      ${
+        /* An action, not a destination, so it is a button rather than an
+           anchor -- and only on the schedule, which is the only tab with
+           anything to scroll to. Disabled until the games arrive. */
+        active === "schedule"
+          ? '<button class="tab tab--action" id="jump-latest" type="button" disabled>Highlight Latest Game</button>'
+          : ""
+      }
     </nav>`;
+}
+
+/* Scrolls the schedule to the game "now" points at and flashes it. Re-resolved
+   on every click rather than remembered, because the live poll re-renders the
+   list and a held DOM reference would be stale. */
+function wireJumpToLatest(container, getGames) {
+  const button = document.getElementById("jump-latest");
+  if (!button) return;
+
+  const games = getGames();
+  const index = latestGameIndex(games);
+  if (index === -1) return;
+
+  button.disabled = false;
+  button.addEventListener("click", () => {
+    const at = latestGameIndex(getGames());
+    const cards = container.querySelectorAll(".game");
+    const card = cards[at === -1 ? 0 : at];
+    if (!card) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    card.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+    for (const other of container.querySelectorAll(".game--flash")) {
+      other.classList.remove("game--flash");
+    }
+    card.classList.add("game--flash");
+  });
 }
 
 async function renderRosterInto(host, team, year, token) {
@@ -412,6 +446,17 @@ async function renderStatsInto(host, team, year, token, explicitYear = false) {
   let stats;
   try {
     stats = await getTeamStats(team, year);
+
+    /* Before falling back a year, try this season's preseason. In August the
+       NFL's 2026 regular-season stats 404 while the preseason ones are already
+       there, and three games played now are more use than last season's totals.
+       Only reached when the regular season has nothing, so it never hides real
+       stats behind exhibition ones. */
+    if (stats.missing) {
+      const pre = await getTeamStats(team, year, { seasonType: 1 });
+      if (!pre.missing && pre.supported) stats = pre;
+    }
+
     /* Same fallback the schedule uses: an implicit current season with nothing
        published yet drops to the last season that has something, rather than
        showing an empty page under a heading that is technically correct. An
@@ -434,7 +479,13 @@ async function renderStatsInto(host, team, year, token, explicitYear = false) {
      while record.js computes W-L-T, so Wrexham's season reads "0-2-0" on this
      tab and "0-0-2" on the schedule -- the same season, two different numbers,
      one screen apart. A heading without a record beats a contradiction. */
-  document.getElementById("record").textContent = `${team.seasonLabel(year)} Season`;
+  /* Say when these are preseason numbers. Three exhibition games and a full
+     season look identical in a table, and only the heading can tell them
+     apart. */
+  const label = stats.preseason
+    ? `${team.seasonLabel(year)} Preseason`
+    : `${team.seasonLabel(year)} Season`;
+  document.getElementById("record").textContent = label;
   /* The fallback above may have moved the year since the title was written. */
   document.title = `${team.name} — ${team.seasonLabel(year)}`;
 
@@ -593,6 +644,13 @@ async function renderTeam(route) {
     });
     board.start(games);
     teardown = board.stop;
+
+    /* The live poll re-renders the cards from its own copy without touching
+       this array, so the statuses here can be up to 15s stale. That only ever
+       shifts the target by one game -- the order is identical, so the index
+       still lands on a real card -- and the alternative is threading the
+       poll's array back out for a scroll button. */
+    wireJumpToLatest(scheduleEl, () => games);
   }
 
   const seasons = await seasonsPromise;

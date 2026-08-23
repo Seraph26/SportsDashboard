@@ -19,8 +19,8 @@ function isRate(label) {
   return /percentage|per game|average|\bavg\b|ratio|rating|\bpct\b|per attempt|yards per/i.test(label);
 }
 
-export async function getTeamStats(team, season, { signal } = {}) {
-  const key = `${team.key}:${season ?? "current"}`;
+export async function getTeamStats(team, season, { seasonType, signal } = {}) {
+  const key = `${team.key}:${season ?? "current"}:${seasonType ?? "any"}`;
   if (cache.has(key)) return cache.get(key);
 
   const league = team.league === "soccer"
@@ -28,7 +28,7 @@ export async function getTeamStats(team, season, { signal } = {}) {
     : team.path;
   const path = `${team.sport}/${league}/teams/${team.teamId}/statistics`;
 
-  const res = await fetch(espnUrl(path, { season }), {
+  const res = await fetch(espnUrl(path, { season, seasontype: seasonType }), {
     signal,
     headers: { Accept: "application/json" },
   });
@@ -38,7 +38,14 @@ export async function getTeamStats(team, season, { signal } = {}) {
      handles, so it is reported rather than thrown, and the caller falls back a
      year exactly as the schedule does. */
   if (res.status === 404) {
-    const miss = { categories: [], supported: false, missing: true, record: "", seasonLabel: "" };
+    const miss = {
+      categories: [],
+      supported: false,
+      missing: true,
+      preseason: false,
+      record: "",
+      seasonLabel: "",
+    };
     cache.set(key, miss);
     return miss;
   }
@@ -66,6 +73,7 @@ export async function getTeamStats(team, season, { signal } = {}) {
   const result = {
     categories,
     missing: false,
+    preseason: Number(seasonType) === 1,
     /* Distinguishes "this league has no stats" from "this season has none" for
        the caller, without it having to know which leagues those are. */
     supported: categories.length > 0,

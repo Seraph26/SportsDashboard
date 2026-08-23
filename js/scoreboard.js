@@ -37,6 +37,36 @@ export function shouldPoll(games) {
   return anyLive(games) || startsSoon(games);
 }
 
+/* Which card "now" points at, as an index into the rendered list. A 166-game
+   baseball season is a lot of scrolling to find today, and "latest" means
+   different things depending on where in the season you are:
+
+     a game in progress    that one, obviously
+     mid-season            the next one still to play, which is the boundary
+                           between results above and fixtures below
+     season over           the last one played
+
+   Returns -1 when there is nothing to point at. */
+export function latestGameIndex(games, now = Date.now()) {
+  if (!games || !games.length) return -1;
+
+  const live = games.findIndex((g) => competition(g)?.status?.type?.state === "in");
+  if (live !== -1) return live;
+
+  const next = games.findIndex((g) => {
+    const state = competition(g)?.status?.type?.state;
+    if (state === "post") return false;
+    const t = new Date(g.date).getTime();
+    return Number.isFinite(t) && t > now;
+  });
+  if (next !== -1) return next;
+
+  for (let i = games.length - 1; i >= 0; i -= 1) {
+    if (competition(games[i])?.status?.type?.completed) return i;
+  }
+  return -1;
+}
+
 export function renderGames(games, teamId, { showWeek = false, team = null } = {}) {
   if (!games.length) {
     return '<p class="empty">No games found for this season.</p>';

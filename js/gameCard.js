@@ -1,7 +1,7 @@
 /* One game, rendered as "Away @ Home" with scores, status and date -- the
    original components/GameCard.tsx. */
 
-import { competition, sides, scoreDisplay, scoreValue, isCompleted } from "./record.js";
+import { competition, sides, scoreDisplay, scoreValue, isCompleted, isPreseason } from "./record.js";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   weekday: "short",
@@ -95,6 +95,12 @@ export function renderGameCard(game, teamId, { showWeek = false, team = null } =
     <${tag} class="game${outcome ? ` game--${outcome}` : ""}${live ? " game--live" : ""}${href ? " game--link" : ""}"${attrs}>
       <header class="game__meta">
         <span class="game__date">${escapeHtml(dateText)}${timeText ? ` &middot; ${escapeHtml(timeText)}` : ""}</span>
+        ${
+          /* Preseason games are on the schedule but out of the record, so the
+             card has to say which it is -- otherwise a 1-2 August looks like a
+             losing start to the season. */
+          isPreseason(game) ? '<span class="game__tag">PRE</span>' : ""
+        }
         ${showWeek && game?.week?.text ? `<span class="game__week">${escapeHtml(game.week.text)}</span>` : ""}
       </header>
       <div class="game__sides">

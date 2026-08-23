@@ -31,27 +31,72 @@ export function currentSeason(league, now = new Date()) {
   return year;
 }
 
+/* Same event can arrive from two calls -- a soccer tie from both the played and
+   the fixture list, a game from two season types -- so merges dedupe on id. */
+function mergeGames(...lists) {
+  const seen = new Map();
+  for (const list of lists) {
+    for (const game of list || []) {
+      const key = game?.id ?? `${game?.date}-${game?.shortName}`;
+      if (!seen.has(key)) seen.set(key, game);
+    }
+  }
+  return [...seen.values()].sort((a, b) => new Date(a.date) - new Date(b.date));
+}
+
+/* One extra call that is allowed to come back empty or fail. Preseason,
+   postseason and cup runs are all optional in exactly this way, and none of
+   them should be able to take the regular season down with it. */
+async function optional(fn) {
+  try {
+    return await fn();
+  } catch {
+    return [];
+  }
+}
+
 async function fetchGames(team, season, opts = {}) {
   switch (team.league) {
     case "nfl": {
-      /* A season is regular season plus whatever postseason exists. Asking for
-         both and concatenating means a playoff run shows up without the page
-         having to know whether there was one. */
+      /* A season is preseason plus regular season plus whatever postseason
+         exists. Asking for each and merging means a playoff run shows up
+         without the page having to know whether there was one -- and preseason
+         shows up at all, which it did not before: the Jets played three games
+         in August that the schedule simply omitted. */
       const regular = await getNFLTeamGames(team.teamId, season, { seasonType: 2, ...opts });
       if (!season) return regular;
-      let post = [];
-      try {
-        post = await getNFLTeamGames(team.teamId, season, { seasonType: 3, ...opts });
-      } catch {
-        /* Postseason is optional; a failure here should not lose the regular
-           season we already have. */
-      }
-      return [...regular, ...post].sort((a, b) => new Date(a.date) - new Date(b.date));
+      const pre = await optional(() =>
+        getNFLTeamGames(team.teamId, season, { seasonType: 1, ...opts }),
+      );
+      const post = await optional(() =>
+        getNFLTeamGames(team.teamId, season, { seasonType: 3, ...opts }),
+      );
+      return mergeGames(pre, regular, post);
     }
-    case "mlb":
-      return getMLBTeamGames(team.teamId, season, opts);
-    case "ncaab":
-      return getNCAABTeamGames(team.teamId, season, opts);
+    case "mlb": {
+      const regular = await getMLBTeamGames(team.teamId, season, { seasonType: 2, ...opts });
+      if (!season) return regular;
+      /* Spring training, same idea as the NFL's preseason. */
+      const pre = await optional(() =>
+        getMLBTeamGames(team.teamId, season, { seasonType: 1, ...opts }),
+      );
+      return mergeGames(pre, regular);
+    }
+    case "ncaab": {
+      /* The plain call returns only whichever season type ESPN currently
+         considers live, which in August is none of them -- Providence's 2026-27
+         schedule is invisible without asking for the regular season by name,
+         even though the games are filed and dated. */
+      const plain = await getNCAABTeamGames(team.teamId, season, opts);
+      if (!season) return plain;
+      const regular = await optional(() =>
+        getNCAABTeamGames(team.teamId, season, { seasonType: 2, ...opts }),
+      );
+      const post = await optional(() =>
+        getNCAABTeamGames(team.teamId, season, { seasonType: 3, ...opts }),
+      );
+      return mergeGames(plain, regular, post);
+    }
     case "soccer": {
       /* Try each division the club could have been in that season and keep the
          first with fixtures. The wrong division answers 200 with an empty list,
@@ -72,21 +117,32 @@ async function fetchGames(team, season, opts = {}) {
          Tagging here is the only place that still knows. */
       for (const game of games) game.leaguePath = league;
 
+      /* The other half of the season. ESPN answers this same URL with results
+         only, or -- given fixture=true -- with the remaining fixtures only. A
+         Championship season in August is two played and forty-four to come, and
+         without this the schedule stopped at the last result. */
+      const upcoming = await optional(() =>
+        getSoccerTeamGames(team.teamId, season, { league, fixture: true, ...opts }),
+      );
+      for (const game of upcoming) game.leaguePath = league;
+      games = mergeGames(games, upcoming);
+
       /* Cups are separate competitions on separate paths, so a club between
          league rounds looks like it has no fixtures at all unless they are
-         merged in. Failures are swallowed: a missing cup must not take the
-         league schedule with it, and most seasons most cups are empty. */
+         merged in. Both halves again, and most cups are empty for most clubs in
+         most seasons, which is why every one of these may fail quietly. */
       for (const cup of team.soccerCups || []) {
-        try {
-          const ties = await getSoccerTeamGames(team.teamId, season, { league: cup, ...opts });
-          for (const tie of ties) tie.leaguePath = cup;
-          games = games.concat(ties);
-        } catch {
-          /* no cup run this season, or ESPN has nothing filed */
-        }
+        const played = await optional(() =>
+          getSoccerTeamGames(team.teamId, season, { league: cup, ...opts }),
+        );
+        const toCome = await optional(() =>
+          getSoccerTeamGames(team.teamId, season, { league: cup, fixture: true, ...opts }),
+        );
+        for (const tie of [...played, ...toCome]) tie.leaguePath = cup;
+        games = mergeGames(games, played, toCome);
       }
 
-      return games.sort((a, b) => new Date(a.date) - new Date(b.date));
+      return games;
     }
     default:
       throw new Error(`Unknown league: ${team.league}`);

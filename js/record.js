@@ -44,13 +44,21 @@ export function sides(game, teamId) {
   return { us, them, home, away };
 }
 
+/* Preseason and spring training are on the schedule but not in the record --
+   a 3-0 August is not part of a team's season, and ESPN's own standings do not
+   count it either. Events carry seasonType {id:"1", name:"Preseason"}. */
+export function isPreseason(game) {
+  const type = game?.seasonType?.type ?? game?.season?.type;
+  return Number(type) === 1;
+}
+
 export function getTeamRecord(games, teamId) {
   let wins = 0;
   let losses = 0;
   let ties = 0;
 
   for (const game of games || []) {
-    if (!isCompleted(game)) continue;
+    if (!isCompleted(game) || isPreseason(game)) continue;
     const { us, them } = sides(game, teamId);
     if (!us || !them) continue;
     const ours = scoreValue(us);
