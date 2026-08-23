@@ -1,3 +1,11 @@
 name = "sportsdashboard"
 main = "worker/src/index.js"
 compatibility_date = "2026-08-17"
+
+# Both of these default to on and wrangler warns about each every deploy. Pinned
+# at their current values so the behaviour is a decision rather than a default:
+# the workers.dev hostname is what WORKER_BASE points at, and preview URLs are
+# how a non-production branch build gets tested before it reaches main. Every
+# such URL enforces the same ALLOWED_ORIGINS gate as production.
+workers_dev = true
+preview_urls = true

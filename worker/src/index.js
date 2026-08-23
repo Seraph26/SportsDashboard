@@ -15,7 +15,7 @@
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-ua-fix";
+const WORKER_VERSION = "2026-08-23-status-params";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -40,8 +40,11 @@ const ALLOWED_PATHS = [
 ];
 
 /* Only these query parameters reach ESPN, so the proxy cannot be used to smuggle
-   arbitrary requests, and the cache key stays small and predictable. */
-const ALLOWED_PARAMS = ["season", "seasontype", "limit"];
+   arbitrary requests, and the cache key stays small and predictable. This is
+   exactly what espnService sends and nothing more -- "limit" was allowed here
+   originally but no call site ever set it, and an unused allowlist entry is
+   surface with no payer. */
+const ALLOWED_PARAMS = ["season", "seasontype"];
 
 /* A finished season never changes; a live one changes every few seconds. The
    client polls every 15s, so caching a current-season response for 15s means a
@@ -145,6 +148,13 @@ export default {
         });
       } catch (err) {
         return json({ error: "upstream unreachable" }, { status: 502, origin });
+      }
+      /* Relay a genuine "no such thing" as 404 instead of flattening every
+         upstream failure into 502. A bad team id or division is a caller
+         mistake and should not read as a gateway fault; everything else --
+         5xx, rate limiting, an ESPN outage -- really is one. */
+      if (res.status === 404) {
+        return json({ error: "not found upstream" }, { status: 404, origin });
       }
       if (!res.ok) {
         return json({ error: `upstream ${res.status}` }, { status: 502, origin });
