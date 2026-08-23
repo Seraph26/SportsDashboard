@@ -57,17 +57,36 @@ async function fetchGames(team, season, opts = {}) {
          first with fixtures. The wrong division answers 200 with an empty list,
          which is why this is a loop and not a try/catch. */
       const leagues = team.soccerLeagues || ["eng.2"];
-      for (const league of leagues) {
-        const games = await getSoccerTeamGames(team.teamId, season, { league, ...opts });
+      let league = null;
+      let games = [];
+      for (const candidate of leagues) {
+        games = await getSoccerTeamGames(team.teamId, season, { league: candidate, ...opts });
         if (games.length) {
-          /* Which division answered is not recoverable from the event itself,
-             and a game detail link needs it -- the summary endpoint is per
-             league. Tagging here is the only place that still knows. */
-          for (const game of games) game.leaguePath = league;
-          return games;
+          league = candidate;
+          break;
         }
       }
-      return [];
+      if (!league) return [];
+      /* Which division answered is not recoverable from the event itself, and a
+         game detail link needs it -- the summary endpoint is per league.
+         Tagging here is the only place that still knows. */
+      for (const game of games) game.leaguePath = league;
+
+      /* Cups are separate competitions on separate paths, so a club between
+         league rounds looks like it has no fixtures at all unless they are
+         merged in. Failures are swallowed: a missing cup must not take the
+         league schedule with it, and most seasons most cups are empty. */
+      for (const cup of team.soccerCups || []) {
+        try {
+          const ties = await getSoccerTeamGames(team.teamId, season, { league: cup, ...opts });
+          for (const tie of ties) tie.leaguePath = cup;
+          games = games.concat(ties);
+        } catch {
+          /* no cup run this season, or ESPN has nothing filed */
+        }
+      }
+
+      return games.sort((a, b) => new Date(a.date) - new Date(b.date));
     }
     default:
       throw new Error(`Unknown league: ${team.league}`);

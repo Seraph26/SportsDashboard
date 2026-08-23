@@ -65,6 +65,11 @@ export const teamConfig = {
        error, so teamData probes these in order and keeps the first that has
        fixtures. Verified: 2024 lives in eng.3, 2025 in eng.2. */
     soccerLeagues: ["eng.2", "eng.3", "eng.1", "eng.4"],
+    /* Cup competitions, merged into the league schedule. Without these a club
+       between league rounds shows "no upcoming game" while a cup tie is days
+       away. Empty in most seasons for most cups, which is why the merge
+       tolerates failure rather than depending on it. */
+    soccerCups: ["eng.league_cup", "eng.fa", "eng.trophy"],
     accent: "#d0021b",
     logo: "https://a.espncdn.com/i/teamlogos/soccer/500/352.png",
     website: "https://www.wrexhamafc.co.uk/",
