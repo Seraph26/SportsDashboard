@@ -22,6 +22,36 @@
   }
 }
 
+
+/* The dashboard's navy world. Single-valued rather than themed: the original
+   board was navy in every context, and these are its Tailwind colours resolved
+   -- sky-300 labels, red-400 team names, emerald-300 countdown, yellow-300
+   "starting soon", green-400 master link. Team pages keep the neutral tokens
+   above, so the two views stay visually distinct the way they were. */
+:root {
+  --board-bg: #000a2a;
+  --board-card: #06133a;
+  --board-tile: #041031;
+  --board-tile-hi: #081842;
+  --board-line: rgba(255, 255, 255, 0.12);
+  --board-text: #e8eefc;
+  --board-muted: rgba(186, 205, 240, 0.75);
+  --board-label: #7dd3fc;
+  --board-team: #f87171;
+  --board-live: #fca5a5;
+  --board-soon: #fde047;
+  --board-count: #6ee7b7;
+  --board-master: #4ade80;
+}
+
+/* Painted on body, not #app, so the navy reaches the full viewport rather than
+   stopping at the content column. */
+body[data-view="home"] {
+  background: var(--board-bg);
+  color: var(--board-text);
+}
+body[data-view="home"] .site-foot { color: var(--board-muted); border-color: var(--board-line); }
+
 * { box-sizing: border-box; }
 
 body {
@@ -65,30 +95,114 @@ a { color: inherit; text-decoration: none; }
 .team-title { display: flex; align-items: center; gap: 16px; }
 .team-title__logo { width: 56px; height: 56px; object-fit: contain; }
 
-/* Homepage grid */
-.team-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
+/* Dashboard -- the original's navy board, four columns of three cards. The
+   palette here is deliberately not the app's neutral tokens: the dashboard was
+   always its own navy world (#000a2a ground, #06133a cards, #041031 tiles) and
+   the team pages were the neutral ones. Keeping that split means the board reads
+   as the front door rather than as another list. */
+.page-head--home { margin-bottom: 32px; text-align: center; }
+.home-title {
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0;
 }
 
-.team-card {
+.board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 28px;
+  align-items: start;
+}
+
+.col { display: flex; flex-direction: column; gap: 20px; }
+
+.card {
+  position: relative;
+  overflow: hidden;
+  background: var(--board-card);
+  border: 1px solid var(--board-line);
+  border-radius: 16px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 24px 16px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-top: 3px solid var(--accent);
-  border-radius: 10px;
-  text-align: center;
-  transition: transform 0.12s ease, border-color 0.12s ease;
+  gap: 12px;
 }
-.team-card:hover { transform: translateY(-2px); border-color: var(--accent); }
-.team-card__logo { width: 64px; height: 64px; object-fit: contain; }
-.team-card__name { font-weight: 600; }
-.team-card__league { color: var(--muted); font-size: 0.8125rem; }
+
+.card--team { padding: 26px 24px; min-height: 150px; justify-content: center; }
+
+.card__watermark {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 62%;
+  max-width: 190px;
+  object-fit: contain;
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.card__body { position: relative; display: flex; flex-direction: column; gap: 14px; }
+
+.team-link {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--board-team);
+  line-height: 1.15;
+}
+.team-link:hover { text-decoration: underline; }
+
+.card__label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--board-label);
+  margin: 0;
+}
+
+.card__note { color: var(--board-muted); font-size: 0.875rem; margin: 0; }
+
+.stack { display: flex; flex-direction: column; gap: 10px; }
+
+.tile {
+  display: block;
+  background: var(--board-tile);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 0.875rem;
+  color: var(--board-text);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.tile:hover { background: var(--board-tile-hi); border-color: var(--board-line); }
+.tile--news { display: flex; flex-direction: column; gap: 4px; line-height: 1.35; }
+.tile__title { font-weight: 500; }
+.tile__src { font-size: 0.75rem; color: var(--board-muted); }
+.tile--site { font-weight: 600; color: var(--board-label); }
+.tile--master { text-align: center; font-weight: 700; color: var(--board-master); }
+
+.board-foot { display: flex; justify-content: center; margin-top: 36px; }
+.card--master { width: min(420px, 100%); text-align: center; align-items: center; }
+.card--master .card__label { text-align: center; }
+.card--master .tile { width: 100%; }
+
+/* Countdown */
+.cd { font-size: 1.0625rem; font-weight: 700; }
+.cd--live { color: var(--board-live); }
+.cd--soon { color: var(--board-soon); }
+.cd--count { color: var(--board-count); }
+.cd--none { font-size: 0.875rem; font-weight: 400; color: var(--board-muted); }
+.cd__opp { font-size: 0.875rem; color: var(--board-muted); margin-top: 3px; }
+
+/* Official site link on a team page */
+.team-site {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--accent);
+}
+.team-site:hover { text-decoration: underline; }
 
 /* Season navigation */
 .seasons {
@@ -176,7 +290,7 @@ a { color: inherit; text-decoration: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .dot { animation: none; }
-  .team-card { transition: none; }
+  .tile { transition: none; }
 }
 
 .site-foot {

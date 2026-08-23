@@ -13,6 +13,8 @@ import { teamList, getTeam } from "./teamConfig.js";
 import { getTeamGames, getAvailableSeasons, currentSeason } from "./teamData.js";
 import { getTeamRecord } from "./record.js";
 import { renderGames, mountScoreboard } from "./scoreboard.js";
+import { mountCountdown, nextGameInfo } from "./countdown.js";
+import { getTeamNews } from "./news.js";
 
 const app = document.getElementById("app");
 let teardown = null;      /* stops the previous page's poll */
@@ -33,30 +35,121 @@ function parseRoute() {
   return { name: "home" };
 }
 
+/* The dashboard. Each team gets a column of three cards -- the team panel with
+   its countdown, its headlines, and its stream links -- matching the original
+   app/page.tsx. That page was server-rendered and had every team's games and
+   news in hand before it emitted any HTML; here the shell is painted first and
+   the three async pieces fill in, because a static page that waits for a dozen
+   ESPN probes before showing anything is a worse trade than one that fills in. */
+const MASTER_STREAM_URL = "https://fmhy.net/video#live-sports";
+
 function renderHome() {
-  document.title = "Sports Dashboard";
+  document.body.dataset.view = "home";
+  document.title = "Roger's Teams";
   app.innerHTML = `
-    <header class="page-head">
-      <h1>Sports Dashboard</h1>
-      <p class="sub">Schedules, scores and records, live from ESPN.</p>
+    <header class="page-head page-head--home">
+      <h1 class="home-title">Roger&apos;s Teams</h1>
     </header>
-    <div class="team-grid">
+    <div class="board">
       ${teamList
         .map(
           (team) => `
-        <a class="team-card" href="#/teams/${team.key}" style="--accent:${team.accent}">
-          <img class="team-card__logo" src="${escapeHtml(team.logo)}" alt="" loading="lazy" />
-          <span class="team-card__name">${escapeHtml(team.name)}</span>
-          <span class="team-card__league">${escapeHtml(leagueLabel(team.league))}</span>
-        </a>`
+        <div class="col" data-team="${escapeHtml(team.key)}">
+          <section class="card card--team" style="--accent:${team.accent}">
+            <img class="card__watermark" src="${escapeHtml(team.logo)}" alt="" aria-hidden="true" loading="lazy" />
+            <div class="card__body">
+              <a class="team-link" href="#/teams/${escapeHtml(team.key)}">${escapeHtml(team.name)}</a>
+              <div class="countdown" data-countdown></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <h2 class="card__label">Latest News</h2>
+            <div class="stack" data-news><p class="card__note">Loading&hellip;</p></div>
+          </section>
+
+          <section class="card">
+            <h2 class="card__label">Live Streams</h2>
+            <div class="stack">
+              ${(team.streams || [])
+                .map(
+                  (s) => `
+                <a class="tile" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(s.label)}</a>`
+                )
+                .join("")}
+              ${
+                team.website
+                  ? `<a class="tile tile--site" href="${escapeHtml(team.website)}" target="_blank" rel="noreferrer noopener">Official site</a>`
+                  : ""
+              }
+            </div>
+          </section>
+        </div>`
         )
         .join("")}
+    </div>
+
+    <div class="board-foot">
+      <section class="card card--master">
+        <h2 class="card__label">Live Streams</h2>
+        <a class="tile tile--master" href="${MASTER_STREAM_URL}" target="_blank" rel="noreferrer noopener">MASTER STREAM LINKS</a>
+      </section>
     </div>`;
+
+  fillDashboard();
 }
 
-function leagueLabel(league) {
-  return { nfl: "NFL", mlb: "MLB", ncaab: "NCAA Basketball", soccer: "Soccer" }[league] || league;
+/* Countdown and headlines for every column. Each team is independent, so one
+   team's ESPN failure leaves the other three counting down. */
+function fillDashboard() {
+  const token = ++navToken;
+  const stoppers = [];
+  teardown = () => {
+    for (const stop of stoppers) stop();
+  };
+
+  for (const team of teamList) {
+    const col = app.querySelector(`.col[data-team="${team.key}"]`);
+    if (!col) continue;
+
+    getTeamGames(team.key, currentSeason(team.league))
+      .then((games) => {
+        if (token !== navToken) return;
+        const el = col.querySelector("[data-countdown]");
+        if (el) stoppers.push(mountCountdown(el, nextGameInfo(games, team.teamId)));
+      })
+      .catch(() => {
+        if (token !== navToken) return;
+        const el = col.querySelector("[data-countdown]");
+        if (el) el.innerHTML = '<div class="cd cd--none">Schedule unavailable</div>';
+      });
+
+    getTeamNews(team.key).then((items) => {
+      if (token !== navToken) return;
+      const el = col.querySelector("[data-news]");
+      if (!el) return;
+      if (items === null) {
+        el.innerHTML = '<p class="card__note">Headlines unavailable right now.</p>';
+        return;
+      }
+      if (!items.length) {
+        el.innerHTML = '<p class="card__note">No headlines today.</p>';
+        return;
+      }
+      el.innerHTML = items
+        .slice(0, 3)
+        .map(
+          (item) => `
+        <a class="tile tile--news" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer noopener">
+          <span class="tile__title">${escapeHtml(item.title)}</span>
+          ${item.source ? `<span class="tile__src">${escapeHtml(item.source)}</span>` : ""}
+        </a>`
+        )
+        .join("");
+    });
+  }
 }
+
 
 function seasonNav(team, seasons, activeYear) {
   if (!seasons.length) return "";
@@ -75,6 +168,7 @@ function seasonNav(team, seasons, activeYear) {
 
 async function renderTeam(route) {
   const token = ++navToken;
+  document.body.dataset.view = "team";
   const team = getTeam(route.team);
   if (!team) {
     app.innerHTML = `<p class="empty">Unknown team: ${escapeHtml(route.team)}. <a href="#/">Back to Dashboard</a></p>`;
@@ -96,6 +190,11 @@ async function renderTeam(route) {
         <div>
           <h1>${escapeHtml(team.name)}</h1>
           <p class="sub" id="record">${escapeHtml(team.seasonLabel(year))} Season</p>
+          ${
+            team.website
+              ? `<a class="team-site" href="${escapeHtml(team.website)}" target="_blank" rel="noreferrer noopener">Official site &nearr;</a>`
+              : ""
+          }
         </div>
       </div>
       <div id="season-nav"></div>

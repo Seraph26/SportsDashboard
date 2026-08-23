@@ -26,6 +26,11 @@ export const teamConfig = {
     path: "nfl",
     accent: "#115740",
     logo: "https://a.espncdn.com/i/teamlogos/nfl/500/nyj.png",
+    website: "https://www.newyorkjets.com/",
+    streams: [
+      { label: "LIVE STREAM 1", url: "https://freestreams-live1b.pk/nfl-live-stream88/" },
+      { label: "LIVE STREAM 2", url: "https://streamed.pk/category/american-football" },
+    ],
     seasonLabel: (y) => `${y}`,
     firstSeason: 2002,
   },
@@ -39,6 +44,11 @@ export const teamConfig = {
     path: "mlb",
     accent: "#002d72",
     logo: "https://a.espncdn.com/i/teamlogos/mlb/500/nym.png",
+    website: "https://www.mlb.com/mets",
+    streams: [
+      { label: "LIVE STREAM 1", url: "https://freestreams-live1b.pk/mlb-stream1/" },
+      { label: "LIVE STREAM 2", url: "https://streamed.pk/category/baseball" },
+    ],
     seasonLabel: (y) => `${y}`,
     firstSeason: 2002,
   },
@@ -57,6 +67,11 @@ export const teamConfig = {
     soccerLeagues: ["eng.2", "eng.3", "eng.1", "eng.4"],
     accent: "#d0021b",
     logo: "https://a.espncdn.com/i/teamlogos/soccer/500/352.png",
+    website: "https://www.wrexhamafc.co.uk/",
+    streams: [
+      { label: "LIVE STREAM 1", url: "https://freestreams-live1b.pk/football-streamz5/" },
+      { label: "LIVE STREAM 2", url: "https://streamed.pk/category/football" },
+    ],
     seasonLabel: (y) => `${y}-${String(y + 1).slice(2)}`,
     firstSeason: 2019,
   },
@@ -70,6 +85,11 @@ export const teamConfig = {
     path: "mens-college-basketball",
     accent: "#000000",
     logo: "https://a.espncdn.com/i/teamlogos/ncaa/500/2507.png",
+    website: "https://friars.com/",
+    streams: [
+      { label: "LIVE STREAM 1", url: "https://freestreams-live1b.pk/ncaa-basketball-streams/" },
+      { label: "CLICK NCAA MEN", url: "https://streamcorner.info/" },
+    ],
     /* ESPN numbers college basketball by the year the season ENDS -- season=2025
        returns the 2024-25 schedule. This is the opposite of soccer above, which
        is numbered by the year it starts, so the two cannot share a label. */
