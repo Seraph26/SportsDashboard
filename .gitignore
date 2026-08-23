@@ -1,5 +1,13 @@
 node_modules/
 .DS_Store
 Thumbs.db
+
+# The working copy of the recovered original, extracted from the USB zip. The
+# committed copy lives in legacy-nextjs/ -- this one is the scratch extraction
+# and would bring node_modules and .next with it.
 Sports Dashboard_OG/
 SportsDashboard-OLD-recovered/
+
+# Never commit the legacy project's build output or dependencies
+legacy-nextjs/node_modules/
+legacy-nextjs/.next/

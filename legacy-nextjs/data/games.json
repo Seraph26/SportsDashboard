@@ -1,0 +1,46 @@
+[
+  {
+    "id": 1,
+    "team_id": 1,
+    "opponent": "Buffalo Bills",
+    "date": "2026-03-16T19:00:00Z",
+    "status": "upcoming",
+    "score_home": 0,
+    "score_away": 0,
+    "stream_url": "",
+    "free_stream_possible": false
+  },
+  {
+    "id": 2,
+    "team_id": 2,
+    "opponent": "Atlanta Braves",
+    "date": "2026-03-17T00:05:00Z",
+    "status": "upcoming",
+    "score_home": 0,
+    "score_away": 0,
+    "stream_url": "",
+    "free_stream_possible": false
+  },
+  {
+    "id": 3,
+    "team_id": 3,
+    "opponent": "Sheffield United",
+    "date": "2026-03-18T14:00:00Z",
+    "status": "upcoming",
+    "score_home": 0,
+    "score_away": 0,
+    "stream_url": "",
+    "free_stream_possible": false
+  },
+  {
+    "id": 4,
+    "team_id": 4,
+    "opponent": "Duke",
+    "date": "2026-03-19T19:30:00Z",
+    "status": "upcoming",
+    "score_home": 0,
+    "score_away": 0,
+    "stream_url": "",
+    "free_stream_possible": false
+  }
+]
