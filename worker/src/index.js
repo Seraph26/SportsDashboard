@@ -15,7 +15,7 @@
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-news";
+const WORKER_VERSION = "2026-08-23-espn-news";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -60,6 +60,35 @@ const CACHE_ARCHIVE_SECONDS = 60 * 60 * 6;
    host already allowlisted here, and sends CORS, so it also works with the
    worker switched off. One source, no second upstream, no RSS parsing. */
 const NEWS_CACHE_SECONDS = 15 * 60;
+
+function allowedOrigin(request) {
+  const origin = request.headers.get("Origin");
+  return origin && ALLOWED_ORIGINS.has(origin) ? origin : null;
+}
+
+function corsHeaders(origin) {
+  return {
+    /* Echo the single origin that asked, never "*", and Vary so a response
+       cached for one origin is not handed to another. */
+    "Access-Control-Allow-Origin": origin || "https://seraph26.github.io",
+    Vary: "Origin",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept",
+  };
+}
+
+function json(body, { status = 200, origin, cacheSeconds = 0 } = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": cacheSeconds
+        ? `public, max-age=${cacheSeconds}, s-maxage=${cacheSeconds}`
+        : "no-store",
+      ...corsHeaders(origin),
+    },
+  });
+}
 
 export default {
   async fetch(request, env, ctx) {
