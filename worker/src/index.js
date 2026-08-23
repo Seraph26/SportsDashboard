@@ -10,12 +10,12 @@
        limiting, the fix is here rather than in every client.
 
    What it deliberately is not: a general proxy. It forwards GET only, to one
-   host, under one path prefix, for an allowlisted set of sports, and only for
+   host, under two known path prefixes, for an allowlisted set of sports, and only for
    the origins that are actually this app. The Lost Ark connector was briefly a
    free public proxy because it answered "*" to everyone; this one does not
    repeat that. */
 
-const WORKER_VERSION = "2026-08-23-espn-news";
+const WORKER_VERSION = "2026-08-23-summary";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -29,6 +29,16 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:8777",
 ]);
 
+/* ESPN keeps standings on a different API prefix -- /apis/v2/sports rather than
+   /apis/site/v2/sports -- so one hardcoded prefix cannot serve both. Rather than
+   special-case standings, the two are a table: a request prefix, the upstream
+   prefix it maps to, and the paths allowed under it. Adding a third ESPN API
+   later is a row, not a branch. */
+const ESPN_V2_PREFIX = "/apis/v2/sports";
+const ALLOWED_PATHS_V2 = [
+  /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/standings$/,
+];
+
 /* Only the four leagues the dashboard actually shows, plus soccer's divisions.
    Anything else is a 404 rather than a pass-through. */
 const ALLOWED_PATHS = [
@@ -38,13 +48,20 @@ const ALLOWED_PATHS = [
   /^soccer\/[a-z]{3}\.\d+\/teams\/\d+\/schedule$/,
   /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/teams$/,
   /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/news$/,
+  /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/summary$/,
+  /^(football\/nfl|baseball\/mlb|basketball\/mens-college-basketball|soccer\/[a-z]{3}\.\d+)\/teams\/\d+\/statistics$/,
 ];
 
 /* Only these query parameters reach ESPN, so the proxy cannot be used to smuggle
    arbitrary requests, and the cache key stays small and predictable. This is
    exactly what the client sends and nothing more: season and seasontype for
-   schedules, team and limit for news. */
-const ALLOWED_PARAMS = ["season", "seasontype", "team", "limit"];
+   schedules, team and limit for news, event for a game summary. */
+const ALLOWED_PARAMS = ["season", "seasontype", "team", "limit", "event"];
+
+const API_ROUTES = [
+  { prefix: "/espn/", upstream: ESPN_PREFIX, paths: ALLOWED_PATHS },
+  { prefix: "/espn2/", upstream: ESPN_V2_PREFIX, paths: ALLOWED_PATHS_V2 },
+];
 
 /* A finished season never changes; a live one changes every few seconds. The
    client polls every 15s, so caching a current-season response for 15s means a
@@ -108,16 +125,17 @@ export default {
       return json({ error: "origin not allowed" }, { status: 403, origin });
     }
 
-    if (!url.pathname.startsWith("/espn/")) {
+    const route = API_ROUTES.find((r) => url.pathname.startsWith(r.prefix));
+    if (!route) {
       return json({ error: "not found" }, { status: 404, origin });
     }
 
-    const path = url.pathname.slice("/espn/".length);
-    if (!ALLOWED_PATHS.some((re) => re.test(path))) {
+    const path = url.pathname.slice(route.prefix.length);
+    if (!route.paths.some((re) => re.test(path))) {
       return json({ error: "path not allowed" }, { status: 404, origin });
     }
 
-    const upstream = new URL(`${ESPN_ORIGIN}${ESPN_PREFIX}/${path}`);
+    const upstream = new URL(`${ESPN_ORIGIN}${route.upstream}/${path}`);
     for (const key of ALLOWED_PARAMS) {
       const value = url.searchParams.get(key);
       if (value !== null && /^[\w.-]{1,16}$/.test(value)) {
@@ -133,11 +151,16 @@ export default {
        15s live TTL, which is far too eager for headlines that turn over a few
        times a day. */
     const isNews = path.endsWith("/news");
-    const cacheSeconds = isNews
-      ? NEWS_CACHE_SECONDS
-      : isArchive
-        ? CACHE_ARCHIVE_SECONDS
-        : CACHE_LIVE_SECONDS;
+    /* Standings carry a season, so the archive rule would cache the *current*
+       table for six hours -- wrong in the other direction. A table moves when a
+       game finishes, so it gets the same quarter-hour as news. */
+    const isStandings = path.endsWith("/standings");
+    const cacheSeconds =
+      isNews || isStandings
+        ? NEWS_CACHE_SECONDS
+        : isArchive
+          ? CACHE_ARCHIVE_SECONDS
+          : CACHE_LIVE_SECONDS;
 
     /* Cache on the upstream URL, not the incoming one, so two origins asking
        for the same season share a single cached copy. */
