@@ -14,7 +14,7 @@
    Nothing else in the app knows which mode is active -- espnService.js builds
    every URL through espnUrl() below. */
 
-export const WORKER_BASE = "";
+export const WORKER_BASE = "https://sportsdashboard.seraph0226.workers.dev";
 
 /* ESPN paths are passed through unchanged, so a worker request looks like
    https://<worker>/espn/football/nfl/teams/20/schedule?season=2025 and the
