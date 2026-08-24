@@ -15,7 +15,7 @@
    was briefly a free public proxy because it answered "*" to everyone; this one
    does not repeat that. */
 
-const WORKER_VERSION = "2026-08-23-core";
+const WORKER_VERSION = "2026-08-24-newaccount";
 const ESPN_ORIGIN = "https://site.api.espn.com";
 const ESPN_PREFIX = "/apis/site/v2/sports";
 
@@ -25,6 +25,9 @@ const ESPN_PREFIX = "/apis/site/v2/sports";
    any Origin it likes. That is what the cache and the narrow path allowlist are
    for. */
 const ALLOWED_ORIGINS = new Set([
+  "https://rr03012.github.io",
+  /* The previous account. Its Pages site is gone (404), so this entry is only
+     here in case the migration is unwound; delete it once that is certain. */
   "https://seraph26.github.io",
   "http://localhost:8777",
 ]);
@@ -104,8 +107,10 @@ function allowedOrigin(request) {
 function corsHeaders(origin) {
   return {
     /* Echo the single origin that asked, never "*", and Vary so a response
-       cached for one origin is not handed to another. */
-    "Access-Control-Allow-Origin": origin || "https://seraph26.github.io",
+       cached for one origin is not handed to another. The fallback only applies
+       to responses that have no caller origin to echo -- /health and the
+       rejections -- so it just needs to be a real origin, not a wildcard. */
+    "Access-Control-Allow-Origin": origin || "https://rr03012.github.io",
     Vary: "Origin",
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Accept",

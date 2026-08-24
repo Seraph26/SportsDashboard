@@ -1,8 +1,17 @@
 # Moving this project to another GitHub account
 
-Written 2026-08-23, while the site is live at
-`https://seraph26.github.io/SportsDashboard/` with the worker at
-`https://sportsdashboard.seraph0226.workers.dev`.
+**Done once already**, on 2026-08-24: `Seraph26/SportsDashboard` was transferred
+to `rr03012/SportsDashboard`, and the site moved from
+`seraph26.github.io/SportsDashboard` to `rr03012.github.io/SportsDashboard`.
+
+What actually broke was item 1 below, exactly as written: the site served fine
+and every ESPN request 403'd, because the new origin was not on the worker's
+allowlist. What did *not* break was item 2 — the repo was **transferred** rather
+than recreated, so GitHub redirects the old URL and Cloudflare's build
+connection followed the repo. A fresh repo instead of a transfer would have
+needed the reconnect.
+
+The rest of this file is the checklist, kept for the next move.
 
 Pushing the code to a new account is the easy part. Four things break silently
 if they are missed, and three of them fail in a way that looks like the site is
