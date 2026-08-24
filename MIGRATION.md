@@ -4,12 +4,18 @@
 to `rr03012/SportsDashboard`, and the site moved from
 `seraph26.github.io/SportsDashboard` to `rr03012.github.io/SportsDashboard`.
 
-What actually broke was item 1 below, exactly as written: the site served fine
-and every ESPN request 403'd, because the new origin was not on the worker's
-allowlist. What did *not* break was item 2 — the repo was **transferred** rather
-than recreated, so GitHub redirects the old URL and Cloudflare's build
-connection followed the repo. A fresh repo instead of a transfer would have
-needed the reconnect.
+Both of the first two items below bit, exactly as written:
+
+1. The site served fine and every ESPN request 403'd, because the new origin was
+   not on the worker's allowlist.
+2. **Cloudflare did not follow the transfer.** Even though GitHub redirects the
+   old repo URL — so `git` kept working against the stale remote — Workers
+   Builds stayed pointed at the old connection and did not rebuild on a push to
+   the new repo. The fix for item 1 could be committed but not deployed until
+   the build connection was repointed by hand in the Cloudflare dashboard.
+
+That second one is worth emphasising: a repo **transfer** looks like it carries
+everything, because git and GitHub both keep working. Cloudflare does not.
 
 The rest of this file is the checklist, kept for the next move.
 
