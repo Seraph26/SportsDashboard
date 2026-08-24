@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sports Dashboard tests</title>
+    <style>
+      :root { color-scheme: dark light; }
+      body {
+        margin: 0;
+        padding: 28px 20px 64px;
+        background: #0f1115;
+        color: #e8eaf0;
+        font: 15px/1.55 ui-monospace, "Cascadia Mono", Consolas, monospace;
+      }
+      main { max-width: 900px; margin: 0 auto; }
+      h1 { font-size: 1.4rem; margin: 0 0 4px; }
+      .sub { color: #949bab; margin: 0 0 24px; font-size: 0.875rem; line-height: 1.5; }
+      #summary {
+        position: sticky; top: 0;
+        padding: 12px 14px; margin-bottom: 18px; border-radius: 8px;
+        background: #171a21; border: 1px solid #2a2f3a; font-weight: 600;
+      }
+      #summary.pass { border-color: #2f9e5e; color: #6ee7b7; }
+      #summary.fail { border-color: #c8483f; color: #fca5a5; }
+      .group { margin-bottom: 18px; }
+      .group h2 { font-size: 0.9rem; color: #7dd3fc; margin: 0 0 6px; letter-spacing: 0.06em; text-transform: uppercase; }
+      .case { padding: 3px 0 3px 22px; position: relative; }
+      .case::before { position: absolute; left: 2px; }
+      .ok::before   { content: "PASS"; color: #2f9e5e; font-size: 0.7rem; left: 0; top: 5px; }
+      .bad::before  { content: "FAIL"; color: #c8483f; font-size: 0.7rem; left: 0; top: 5px; }
+      .ok { color: #949bab; }
+      .bad { color: #fca5a5; }
+      .why { color: #b08a34; padding-left: 22px; font-size: 0.8125rem; }
+      footer { color: #949bab; font-size: 0.8125rem; margin-top: 28px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Sports Dashboard tests</h1>
+      <p class="sub">
+        Pure functions only, against fixed payloads shaped like ESPN's — no
+        network, so this is deterministic and runs offline. There is no
+        <code>node</code> on the dev machine, so the browser is the test runner:
+        serve the folder and open this page.
+      </p>
+      <div id="summary">running…</div>
+      <div id="out"></div>
+      <footer>
+        These cover the parsing and selection logic, which is where the bugs have
+        actually been. Rendering and network paths are still checked by hand.
+      </footer>
+    </main>
+
+    <script type="module">
+      import { getTeamRecord, isPreseason, scoreValue, isCompleted } from "./js/record.js";
+      import { currentSeason } from "./js/teamData.js";
+      import { formatCountdown, nextGameInfo } from "./js/countdown.js";
+      import { latestGameIndex } from "./js/scoreboard.js";
+      import { timeline, teamStatRows, summaryHeader } from "./js/gameDetails.js";
+      import { espnUrl } from "./js/config.js";
+      import { getTeam, teamList } from "./js/teamConfig.js";
+
+      const out = document.getElementById("out");
+      let passed = 0;
+      let failed = 0;
+      let group = null;
+
+      function describe(name) {
+        group = document.createElement("div");
+        group.className = "group";
+        group.innerHTML = `<h2>${name}</h2>`;
+        out.appendChild(group);
+      }
+
+      function it(name, fn) {
+        let error = null;
+        try {
+          fn();
+        } catch (err) {
+          error = err;
+        }
+        const line = document.createElement("div");
+        line.className = `case ${error ? "bad" : "ok"}`;
+        line.textContent = name;
+        group.appendChild(line);
+        if (error) {
+          failed += 1;
+          const why = document.createElement("div");
+          why.className = "why";
+          why.textContent = error.message;
+          group.appendChild(why);
+        } else {
+          passed += 1;
+        }
+      }
+
+      function eq(actual, expected, label = "") {
+        const a = JSON.stringify(actual);
+        const b = JSON.stringify(expected);
+        if (a !== b) throw new Error(`${label}expected ${b}, got ${a}`);
+      }
+
+      /* ---- fixtures, shaped exactly like the ESPN payloads ---- */
+
+      const game = ({
+        id = "1",
+        date = "2026-01-01T18:00Z",
+        state = "post",
+        completed = true,
+        usId = "20",
+        usScore = 3,
+        themScore = 1,
+        seasonType = 2,
+        usHome = true,
+      } = {}) => ({
+        id,
+        date,
+        seasonType: { id: String(seasonType), type: seasonType, name: "x" },
+        competitions: [
+          {
+            status: { type: { state, completed, shortDetail: "Final" } },
+            competitors: [
+              {
+                homeAway: usHome ? "home" : "away",
+                team: { id: usId, displayName: "New York Jets" },
+                score: { value: usScore, displayValue: String(usScore) },
+              },
+              {
+                homeAway: usHome ? "away" : "home",
+                team: { id: "99", displayName: "Tennessee Titans" },
+                score: { value: themScore, displayValue: String(themScore) },
+              },
+            ],
+          },
+        ],
+      });
+
+      /* ---- score parsing: the original app's silent bug ---- */
+
+      describe("record.js — score parsing");
+
+      it("reads competitor.score as an object, not a number", () => {
+        eq(scoreValue({ score: { value: 7, displayValue: "7" } }), 7);
+      });
+
+      it("still reads the bare-string form older payloads use", () => {
+        eq(scoreValue({ score: "7" }), 7);
+      });
+
+      it("returns null rather than NaN for a missing score", () => {
+        eq(scoreValue({}), null);
+        eq(scoreValue({ score: null }), null);
+      });
+
+      it("falls back to displayValue when value is absent", () => {
+        eq(scoreValue({ score: { displayValue: "12" } }), 12);
+      });
+
+      describe("record.js — W-L-T");
+
+      it("counts wins, losses and draws", () => {
+        const games = [
+          game({ id: "a", usScore: 3, themScore: 1 }),
+          game({ id: "b", usScore: 0, themScore: 2 }),
+          game({ id: "c", usScore: 1, themScore: 1 }),
+        ];
+        eq(getTeamRecord(games, "20").text, "1-1-1");
+      });
+
+      it("ignores games that are not finished", () => {
+        const games = [
+          game({ id: "a", usScore: 3, themScore: 1 }),
+          game({ id: "b", state: "pre", completed: false, usScore: null, themScore: null }),
+        ];
+        eq(getTeamRecord(games, "20").text, "1-0-0");
+      });
+
+      it("leaves preseason out of the record", () => {
+        const games = [
+          game({ id: "a", usScore: 3, themScore: 1, seasonType: 1 }),
+          game({ id: "b", usScore: 3, themScore: 1, seasonType: 1 }),
+          game({ id: "c", usScore: 0, themScore: 4, seasonType: 2 }),
+        ];
+        eq(getTeamRecord(games, "20").text, "0-1-0", "preseason wins must not count: ");
+      });
+
+      it("recognises preseason from either field ESPN uses", () => {
+        eq(isPreseason({ seasonType: { type: 1 } }), true);
+        eq(isPreseason({ season: { type: 1 } }), true);
+        eq(isPreseason({ seasonType: { type: 2 } }), false);
+        eq(isPreseason({}), false);
+      });
+
+      /* ---- the three opposite season conventions ---- */
+
+      describe("teamData.js — season year conventions");
+
+      const aug = new Date("2026-08-23T12:00Z");
+      const feb = new Date("2026-02-10T12:00Z");
+
+      it("NFL and MLB use the calendar year", () => {
+        eq(currentSeason("nfl", aug), 2026);
+        eq(currentSeason("mlb", feb), 2026);
+      });
+
+      it("soccer uses the year the campaign starts", () => {
+        eq(currentSeason("soccer", aug), 2026, "August is the new campaign: ");
+        eq(currentSeason("soccer", feb), 2025, "February is still last August's: ");
+      });
+
+      it("college basketball uses the year it ends — the opposite", () => {
+        eq(currentSeason("ncaab", aug), 2027);
+        eq(currentSeason("ncaab", feb), 2026);
+      });
+
+      it("soccer and ncaab never agree in the same month", () => {
+        if (currentSeason("soccer", aug) === currentSeason("ncaab", aug)) {
+          throw new Error("the two conventions collapsed into one");
+        }
+      });
+
+      /* ---- countdown ---- */
+
+      describe("countdown.js");
+
+      it("formats a game tonight as H:MM:SS", () => {
+        eq(formatCountdown(3 * 3600e3 + 4 * 60e3 + 5e3), "3:04:05");
+      });
+
+      it("formats a game ten weeks out as days, not 1684 hours", () => {
+        eq(formatCountdown(70 * 86400e3), "70d 00h");
+      });
+
+      it("switches format exactly at two days", () => {
+        eq(formatCountdown(48 * 3600e3), "2d 00h");
+        eq(formatCountdown(48 * 3600e3 - 1000), "47:59:59");
+      });
+
+      it("never renders a negative countdown", () => {
+        eq(formatCountdown(-5000), "0:00:00");
+      });
+
+      it("prefers a live game over the next fixture", () => {
+        const games = [
+          game({ id: "past", date: "2026-01-01T18:00Z" }),
+          game({ id: "live", date: "2026-06-01T18:00Z", state: "in", completed: false }),
+          game({ id: "next", date: "2099-01-01T18:00Z", state: "pre", completed: false }),
+        ];
+        eq(nextGameInfo(games, "20").isLive, true);
+      });
+
+      it("names the opponent, not the matchup, and says vs or at", () => {
+        const home = nextGameInfo(
+          [game({ date: "2099-01-01T18:00Z", state: "pre", completed: false, usHome: true })],
+          "20",
+        );
+        eq(home.opponent, "vs Tennessee Titans");
+        const away = nextGameInfo(
+          [game({ date: "2099-01-01T18:00Z", state: "pre", completed: false, usHome: false })],
+          "20",
+        );
+        eq(away.opponent, "at Tennessee Titans");
+      });
+
+      it("reports nothing scheduled when every game is in the past", () => {
+        eq(nextGameInfo([game({ date: "2020-01-01T18:00Z" })], "20").opponent, null);
+      });
+
+      /* ---- which card "now" points at ---- */
+
+      describe("scoreboard.js — latest game");
+
+      it("points at a live game", () => {
+        const games = [
+          game({ id: "a" }),
+          game({ id: "b", state: "in", completed: false }),
+          game({ id: "c", date: "2099-01-01T18:00Z", state: "pre", completed: false }),
+        ];
+        eq(latestGameIndex(games), 1);
+      });
+
+      it("otherwise points at the next unplayed game", () => {
+        const games = [
+          game({ id: "a" }),
+          game({ id: "b" }),
+          game({ id: "c", date: "2099-01-01T18:00Z", state: "pre", completed: false }),
+        ];
+        eq(latestGameIndex(games), 2);
+      });
+
+      it("falls back to the last game of a finished season", () => {
+        eq(latestGameIndex([game({ id: "a" }), game({ id: "b" })]), 1);
+      });
+
+      it("returns -1 for an empty schedule", () => {
+        eq(latestGameIndex([]), -1);
+        eq(latestGameIndex(null), -1);
+      });
+
+      /* ---- game summaries differ per league ---- */
+
+      describe("gameDetails.js — per-league shapes");
+
+      it("labels NFL scoringPlays as Scoring", () => {
+        const t = timeline({
+          scoringPlays: [
+            { text: "TD", awayScore: 7, homeScore: 0, period: { displayValue: "Q1" } },
+          ],
+        });
+        eq(t.label, "Scoring");
+        eq(t.items.length, 1);
+      });
+
+      it("labels soccer keyEvents as Key Events, not Scoring", () => {
+        const t = timeline({
+          keyEvents: [
+            { type: { text: "Kickoff" }, clock: { displayValue: "" } },
+            {
+              type: { text: "Goal" },
+              shortText: "Player Goal",
+              scoringPlay: true,
+              clock: { displayValue: "14'" },
+              team: { displayName: "Watford" },
+            },
+          ],
+        });
+        eq(t.label, "Key Events");
+        eq(t.items.length, 2, "cards and subs belong in the list too: ");
+      });
+
+      it("leaves the score column empty for soccer, which carries none", () => {
+        const t = timeline({
+          keyEvents: [
+            { type: { text: "Goal" }, shortText: "G", scoringPlay: true, clock: { displayValue: "14'" } },
+          ],
+        });
+        eq(t.items[0].score, "", "soccer key events have no running score: ");
+        eq(t.items[0].scoring, true);
+      });
+
+      it("reads soccer participants, not athletesInvolved", () => {
+        const t = timeline({
+          keyEvents: [
+            {
+              type: { text: "Goal" },
+              clock: { displayValue: "20'" },
+              participants: [{ athlete: { displayName: "Nathan Broadhead" } }],
+            },
+          ],
+        });
+        if (!t.items[0].text.includes("Nathan Broadhead")) {
+          throw new Error(`name dropped: ${t.items[0].text}`);
+        }
+      });
+
+      it("returns an empty timeline when a league has neither block", () => {
+        eq(timeline({}), { label: "", items: [] });
+      });
+
+      it("pivots team stats into label / away / home", () => {
+        const payload = {
+          boxscore: {
+            teams: [
+              { team: { id: "20" }, statistics: [{ name: "fouls", label: "Fouls", displayValue: "13" }] },
+              { team: { id: "99" }, statistics: [{ name: "fouls", label: "Fouls", displayValue: "9" }] },
+            ],
+          },
+        };
+        eq(teamStatRows(payload, "20", "99"), [{ label: "Fouls", away: "9", home: "13" }]);
+      });
+
+      it("keys team stats by name, not position", () => {
+        const payload = {
+          boxscore: {
+            teams: [
+              {
+                team: { id: "20" },
+                statistics: [
+                  { name: "a", label: "A", displayValue: "1" },
+                  { name: "b", label: "B", displayValue: "2" },
+                ],
+              },
+              { team: { id: "99" }, statistics: [{ name: "b", label: "B", displayValue: "9" }] },
+            ],
+          },
+        };
+        const rows = teamStatRows(payload, "20", "99");
+        const b = rows.find((r) => r.label === "B");
+        eq(b, { label: "B", away: "9", home: "2" }, "misaligned lists must not shift values: ");
+      });
+
+      it("survives a summary with no boxscore at all", () => {
+        eq(teamStatRows({}, "20", "99"), []);
+        const head = summaryHeader({});
+        eq(head.home, null);
+        eq(head.away, null);
+      });
+
+      /* ---- URL building across ESPN's three APIs ---- */
+
+      describe("config.js — espnUrl");
+
+      it("builds a site API url", () => {
+        const u = espnUrl("football/nfl/teams/20/schedule", { season: 2024 });
+        if (!u.includes("/football/nfl/teams/20/schedule")) throw new Error(u);
+        if (!u.includes("season=2024")) throw new Error(u);
+      });
+
+      it("routes standings to the v2 prefix", () => {
+        const u = espnUrl("football/nfl/standings", {}, { api: "v2" });
+        const ok = u.includes("/espn2/") || u.includes("/apis/v2/sports/");
+        if (!ok) throw new Error(`v2 not routed: ${u}`);
+      });
+
+      it("routes soccer statistics to the core API", () => {
+        const u = espnUrl("soccer/leagues/eng.2/seasons/2026/types/1/teams/352/statistics", {}, { api: "core" });
+        const ok = u.includes("/espncore/") || u.includes("sports.core.api.espn.com");
+        if (!ok) throw new Error(`core not routed: ${u}`);
+      });
+
+      it("drops empty params rather than sending season=", () => {
+        const u = espnUrl("football/nfl/news", { team: "20", limit: undefined, season: "" });
+        if (u.includes("season=")) throw new Error(u);
+        if (!u.includes("team=20")) throw new Error(u);
+      });
+
+      /* ---- config sanity ---- */
+
+      describe("teamConfig.js");
+
+      it("every team has what the pages need", () => {
+        for (const team of teamList) {
+          for (const field of ["key", "name", "league", "teamId", "sport", "accent", "logo"]) {
+            if (!team[field]) throw new Error(`${team.key || "?"} is missing ${field}`);
+          }
+          if (typeof team.seasonLabel !== "function") throw new Error(`${team.key} has no seasonLabel`);
+        }
+      });
+
+      it("labels seasons the way each league counts them", () => {
+        eq(getTeam("jets").seasonLabel(2024), "2024");
+        eq(getTeam("wrexham").seasonLabel(2024), "2024-25", "soccer is start-year: ");
+        eq(getTeam("providence").seasonLabel(2025), "2024-25", "ncaab is end-year: ");
+      });
+
+      it("non-soccer teams carry a league path", () => {
+        for (const team of teamList) {
+          if (team.league === "soccer") {
+            if (!team.soccerLeagues?.length) throw new Error("wrexham lost its division list");
+          } else if (!team.path) {
+            throw new Error(`${team.key} has no path`);
+          }
+        }
+      });
+
+      it("soccer cup slugs are words, not the numbered division form", () => {
+        for (const cup of getTeam("wrexham").soccerCups || []) {
+          if (/^[a-z]{3}\.\d+$/.test(cup)) throw new Error(`${cup} looks like a division, not a cup`);
+        }
+      });
+
+      /* ---- done ---- */
+
+      const summary = document.getElementById("summary");
+      summary.textContent = failed
+        ? `${failed} failed, ${passed} passed`
+        : `all ${passed} passed`;
+      summary.className = failed ? "fail" : "pass";
+      document.title = failed ? `${failed} failing — tests` : `${passed} passing — tests`;
+    </script>
+  </body>
+</html>

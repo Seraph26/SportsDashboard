@@ -506,3 +506,30 @@ a { color: inherit; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .game--flash { animation: none; }
 }
+
+/* A game in progress is the reason to have this page open, so the whole column
+   is marked, not just the line of text. */
+.col--live .card--team {
+  border-color: var(--board-live);
+  box-shadow: 0 0 0 1px var(--board-live);
+}
+
+.cd--live { display: flex; align-items: center; gap: 8px; font-size: 1.5rem; }
+
+.cd__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--board-live);
+  flex: none;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd__dot { animation: none; }
+}

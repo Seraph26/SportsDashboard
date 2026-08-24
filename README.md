@@ -121,6 +121,19 @@ server.
   team page falls back to the last season actually played rather than showing an
   empty list under a heading that is technically correct.
 
+
+## Tests
+
+There is no `node` here, so the browser is the test runner. Serve the folder and
+open <http://localhost:8777/tests.html>; the tab title reports the result.
+
+    39 assertions, no network, deterministic
+
+They cover the pure functions, which is where every bug so far has actually
+been: score parsing, the three season-year conventions, the countdown format,
+which game "now" points at, and the per-league game-summary shapes. Rendering
+and network paths are still checked by hand.
+
 ## Local development
 
 There is no `node` on the dev machine. Serve the folder over HTTP — ES modules

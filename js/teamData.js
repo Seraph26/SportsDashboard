@@ -169,25 +169,76 @@ export async function getAvailableSeasons(teamKey, { max = 12, signal } = {}) {
   if (!team) throw new Error(`Unknown team: ${teamKey}`);
 
   const start = currentSeason(team.league);
+  const oldest = team.firstSeason || start - max;
+
+  const remembered = readSeasons(team.key);
+  if (remembered) return remembered;
+
+  /* Probe the whole window at once rather than walking back a year at a time.
+     Sequentially this was up to twelve round trips before the season buttons
+     appeared -- the schedule beside them had long since rendered. They are
+     independent questions, so they go together; the edge cache means the cost
+     upstream is the same either way.
+
+     The stop-after-two-misses rule from the sequential version is applied to
+     the results afterwards, so the behaviour is unchanged: a team that simply
+     did not play one season does not truncate the list, but a long empty tail
+     does not extend it. */
+  const years = [];
+  for (let year = start; year >= oldest && years.length < max; year -= 1) years.push(year);
+
+  const probes = await Promise.all(
+    years.map(async (year) => {
+      try {
+        const games = await getTeamGames(team.key, year, { signal });
+        return { year, hasGames: games.length > 0 };
+      } catch {
+        return { year, hasGames: false };
+      }
+    }),
+  );
+
   const found = [];
   let misses = 0;
-
-  for (let year = start; year >= (team.firstSeason || start - max) && found.length < max; year--) {
-    let games = [];
-    try {
-      games = await getTeamGames(team.key, year, { signal });
-    } catch {
-      games = [];
-    }
-    if (games.length) {
+  for (const { year, hasGames } of probes) {
+    if (hasGames) {
       found.push(year);
       misses = 0;
     } else if (found.length) {
-      /* Only count misses once we have started finding seasons, so an upcoming
-         season with no schedule posted yet does not end the search. */
       misses += 1;
       if (misses >= 2) break;
     }
   }
+
+  writeSeasons(team.key, found);
   return found;
+}
+
+/* Which seasons a team has is close to immutable -- one new entry a year -- so
+   it survives a reload rather than costing a dozen requests again. Kept short
+   enough that a season appearing mid-week still shows up, and wrapped because
+   localStorage throws in private windows and when the quota is full. */
+const SEASONS_KEY = "sd:seasons:v1";
+const SEASONS_TTL_MS = 12 * 60 * 60 * 1000;
+
+function readSeasons(teamKey) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SEASONS_KEY) || "{}");
+    const entry = all[teamKey];
+    if (!entry || Date.now() - entry.at > SEASONS_TTL_MS) return null;
+    return Array.isArray(entry.years) && entry.years.length ? entry.years : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeSeasons(teamKey, years) {
+  if (!years.length) return;
+  try {
+    const all = JSON.parse(localStorage.getItem(SEASONS_KEY) || "{}");
+    all[teamKey] = { years, at: Date.now() };
+    localStorage.setItem(SEASONS_KEY, JSON.stringify(all));
+  } catch {
+    /* Private window, or the quota is full. The probe still works. */
+  }
 }

@@ -125,14 +125,82 @@ function renderHome() {
   fillDashboard();
 }
 
+/* How often the dashboard re-checks game state. The countdown ticks locally
+   without help, but nothing else changes unless the schedule is fetched again:
+   a game that kicks off while this page is open would otherwise sit at
+   "Starting soon" indefinitely. This is the page most likely to be left open on
+   a second screen, so it needs the refresh more than the team page does. */
+const DASH_REFRESH_MS = 60000;
+/* Once a game is live, follow it at the team page's rate instead. */
+const DASH_LIVE_REFRESH_MS = 20000;
+
 /* Countdown and headlines for every column. Each team is independent, so one
    team's ESPN failure leaves the other three counting down. */
 function fillDashboard() {
   const token = ++navToken;
   const stoppers = [];
+  let refreshTimer = null;
+
   teardown = () => {
     for (const stop of stoppers) stop();
+    clearTimeout(refreshTimer);
   };
+
+  /* Paints one team's countdown and returns whether it is live, so the refresh
+     loop can decide its own pace. */
+  function paintCountdown(team, col, games) {
+    const el = col.querySelector("[data-countdown]");
+    if (!el) return false;
+    const info = nextGameInfo(games, team.teamId);
+    /* Replace rather than accumulate: each refresh mounts a new ticker. */
+    const previous = el._stop;
+    if (previous) {
+      previous();
+      const at = stoppers.indexOf(previous);
+      if (at !== -1) stoppers.splice(at, 1);
+    }
+    const stop = mountCountdown(el, info);
+    el._stop = stop;
+    stoppers.push(stop);
+    col.classList.toggle("col--live", Boolean(info.isLive));
+    return Boolean(info.isLive);
+  }
+
+  async function refresh() {
+    if (token !== navToken) return;
+    let anyLive = false;
+    await Promise.all(
+      teamList.map(async (team) => {
+        const col = app.querySelector(`.col[data-team="${team.key}"]`);
+        if (!col) return;
+        try {
+          const games = await getTeamGames(team.key, currentSeason(team.league), {
+            refresh: true,
+          });
+          if (token !== navToken) return;
+          if (paintCountdown(team, col, games)) anyLive = true;
+        } catch {
+          /* Leave whatever is already on screen; a failed refresh should not
+             blank a working countdown. */
+        }
+      }),
+    );
+    if (token !== navToken) return;
+    /* Paused while the tab is hidden, same reasoning as the team page poll: a
+       background tab refreshing four schedules forever is how an origin gets
+       rate limited. The visibility handler below catches up on return. */
+    if (!document.hidden) {
+      refreshTimer = setTimeout(refresh, anyLive ? DASH_LIVE_REFRESH_MS : DASH_REFRESH_MS);
+    }
+  }
+
+  function onVisibility() {
+    if (token !== navToken) return;
+    clearTimeout(refreshTimer);
+    if (!document.hidden) refresh();
+  }
+  document.addEventListener("visibilitychange", onVisibility);
+  stoppers.push(() => document.removeEventListener("visibilitychange", onVisibility));
 
   for (const team of teamList) {
     const col = app.querySelector(`.col[data-team="${team.key}"]`);
@@ -141,8 +209,11 @@ function fillDashboard() {
     getTeamGames(team.key, currentSeason(team.league))
       .then((games) => {
         if (token !== navToken) return;
-        const el = col.querySelector("[data-countdown]");
-        if (el) stoppers.push(mountCountdown(el, nextGameInfo(games, team.teamId)));
+        const live = paintCountdown(team, col, games);
+        /* Start the loop once, after the first team resolves. */
+        if (!refreshTimer) {
+          refreshTimer = setTimeout(refresh, live ? DASH_LIVE_REFRESH_MS : DASH_REFRESH_MS);
+        }
       })
       .catch(() => {
         if (token !== navToken) return;
@@ -222,7 +293,7 @@ function teamTabs(team, explicitYear, active = "schedule") {
 /* Scrolls the schedule to the game "now" points at and flashes it. Re-resolved
    on every click rather than remembered, because the live poll re-renders the
    list and a held DOM reference would be stale. */
-function wireJumpToLatest(container, getGames) {
+function wireJumpToLatest(container, getGames, { autoJump = false } = {}) {
   const button = document.getElementById("jump-latest");
   if (!button) return;
 
@@ -231,6 +302,18 @@ function wireJumpToLatest(container, getGames) {
   if (index === -1) return;
 
   button.disabled = false;
+
+  /* Opening the current season lands you at game one of a hundred and ninety
+     three, which is never what you wanted. Jump straight there -- without the
+     flash, which would be noise you did not ask for, and without smooth
+     scrolling, which would animate a page you have not seen yet. Past seasons
+     open at the top, because there "latest" means the last game of a year that
+     finished and the top is a reasonable place to start. */
+  if (autoJump) {
+    const card = container.querySelectorAll(".game")[index];
+    if (card) card.scrollIntoView({ behavior: "auto", block: "center" });
+  }
+
   button.addEventListener("click", () => {
     const at = latestGameIndex(getGames());
     const cards = container.querySelectorAll(".game");
@@ -650,7 +733,7 @@ async function renderTeam(route) {
        shifts the target by one game -- the order is identical, so the index
        still lands on a real card -- and the alternative is threading the
        poll's array back out for a scroll button. */
-    wireJumpToLatest(scheduleEl, () => games);
+    wireJumpToLatest(scheduleEl, () => games, { autoJump: year === current });
   }
 
   const seasons = await seasonsPromise;
