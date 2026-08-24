@@ -293,7 +293,7 @@ function teamTabs(team, explicitYear, active = "schedule") {
 /* Scrolls the schedule to the game "now" points at and flashes it. Re-resolved
    on every click rather than remembered, because the live poll re-renders the
    list and a held DOM reference would be stale. */
-function wireJumpToLatest(container, getGames, { autoJump = false } = {}) {
+function wireJumpToLatest(container, getGames) {
   const button = document.getElementById("jump-latest");
   if (!button) return;
 
@@ -303,17 +303,9 @@ function wireJumpToLatest(container, getGames, { autoJump = false } = {}) {
 
   button.disabled = false;
 
-  /* Opening the current season lands you at game one of a hundred and ninety
-     three, which is never what you wanted. Jump straight there -- without the
-     flash, which would be noise you did not ask for, and without smooth
-     scrolling, which would animate a page you have not seen yet. Past seasons
-     open at the top, because there "latest" means the last game of a year that
-     finished and the top is a reasonable place to start. */
-  if (autoJump) {
-    const card = container.querySelectorAll(".game")[index];
-    if (card) card.scrollIntoView({ behavior: "auto", block: "center" });
-  }
-
+  /* Deliberately no automatic jump. The page opens at the top and the button is
+     there for whoever wants it -- scrolling someone somewhere they did not ask
+     to go is worse than the scroll it saves. */
   button.addEventListener("click", () => {
     const at = latestGameIndex(getGames());
     const cards = container.querySelectorAll(".game");
@@ -733,7 +725,7 @@ async function renderTeam(route) {
        shifts the target by one game -- the order is identical, so the index
        still lands on a real card -- and the alternative is threading the
        poll's array back out for a scroll button. */
-    wireJumpToLatest(scheduleEl, () => games, { autoJump: year === current });
+    wireJumpToLatest(scheduleEl, () => games);
   }
 
   const seasons = await seasonsPromise;
