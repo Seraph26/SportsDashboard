@@ -77,6 +77,20 @@ They carry the old account's address. Set them to whatever the new account
 should attribute commits to, or the new repo's history will point at the old
 identity.
 
+
+## If you hand-edit the worker in the dashboard
+
+Cloudflare's editor deploys immediately, which is the right thing to reach for
+when the site is down. Be aware it puts the deployed worker ahead of this repo:
+on 2026-08-24 the deployed code had the new origin allowlisted while still
+reporting `version: "2026-08-23-core"`, because only the one line had been
+changed. `/health` reporting an old version while new behaviour works is the
+signature of exactly that.
+
+Repointing the build connection and pushing puts them back in step -- the repo
+version overwrites the hand edit with the same fix plus whatever else was
+committed meanwhile.
+
 ## Rollback while migrating
 
 `WORKER_BASE = ""` in `js/config.js` makes the browser call ESPN directly and
