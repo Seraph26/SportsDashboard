@@ -95,9 +95,11 @@ export const teamConfig = {
        team's own payload says it plays (groups.id). */
     standingsGroup: "4",
     website: "https://friars.com/",
+    /* "CLICK NCAA MEN" (streamcorner.info) was here and is dead -- removed
+       2026-08-23. These links rot faster than anything else in this config;
+       the master list on the dashboard is the fallback when one goes. */
     streams: [
       { label: "LIVE STREAM 1", url: "https://freestreams-live1b.pk/ncaa-basketball-streams/" },
-      { label: "CLICK NCAA MEN", url: "https://streamcorner.info/" },
     ],
     /* ESPN numbers college basketball by the year the season ENDS -- season=2025
        returns the 2024-25 schedule. This is the opposite of soccer above, which
